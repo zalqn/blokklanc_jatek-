@@ -499,7 +499,12 @@ if (!TOKEN) { TOKEN = rnd(20, B32); store.set('bc_tok', TOKEN); }
 let H = null, hp = null, conns = new Map(), seenH = -1, seenNick = new Set(), sendTimer = null, saveTimer = null, idTries = 0;
 const tip = () => H.chain[H.chain.length - 1];
 const byAddr = a => Object.values(H.players).find(p => p.addr === a);
-const pendOut = a => H.mempool.filter(x => x.from === a).reduce((s, x) => s + x.amt, 0);
+const pendOut = a => H.mempool.filter(x => x.from === a).reduce((s, x) => s + x.amt + (x.tip || 0), 0);
+const curPre = () => (H && H.pfx) || PREFIX;
+const curRew = (h = H.chain.length) => REWARD / 2 ** Math.floor((h - 1) / 10); // felezés 10 blokkonként
+function payout(p, amt) { p.bal += amt; } // a bányász-kör (pool) modul felülírja
+const inF = p => !!(H.F && (H.F.tok === p.tok || (H.F.team || []).includes(p.tok)));
+const sigOf = (sec, to, amt, tip) => sha256(sec + '|' + to + '|' + amt + '|' + tip);
 
 function newCode() { return String(100000 + crypto.getRandomValues(new Uint32Array(1))[0] % 900000); }
 function newGame() {
@@ -562,8 +567,9 @@ function onHostMsg(c, m) {
       const taken = new Set(Object.values(H.players).map(x => x.nick.toLowerCase()));
       let n = nick, i = 2; while (taken.has(n.toLowerCase())) n = nick.slice(0, 13) + ' ' + i++;
       let addr; do addr = 'bc1q' + rnd(10, B32); while (byAddr(addr));
-      p = H.players[tok] = {tok, pid: rnd(8, B32), nick: n, addr, bal: START, mined: 0, sent: 0, got: 0, on: true, at: Date.now()};
+      p = H.players[tok] = {tok, pid: rnd(8, B32), sec: rnd(12, B32), nick: n, addr, bal: START, mined: 0, sent: 0, got: 0, on: true, at: Date.now()};
     }
+    if (!p.sec) p.sec = rnd(12, B32);
     c._tok = tok;
     const old = conns.get(tok);
     if (old && old !== c) { old._tok = null; try { old.close(); } catch (e) {} }
@@ -574,13 +580,15 @@ function onHostMsg(c, m) {
   if (!p) return;
   if (m.t === 'send') {
     if (H.phase !== 'play') return reply(c, 'bad', 'Most nem lehet utalni.');
-    const amt = Math.floor(Number(m.amt)), r = byAddr(String(m.to || ''));
+    const amt = Math.floor(Number(m.amt)), r = byAddr(String(m.to || '')), tipv = Math.floor(Number(m.tip) || 0);
     if (!r || r === p) return reply(c, 'bad', 'Ismeretlen cím.');
     if (!(amt >= 1 && amt <= 1000)) return reply(c, 'bad', 'Érvénytelen összeg.');
-    if (p.bal - pendOut(p.addr) < amt) return reply(c, 'bad', 'Nincs elég szabad coinod.');
+    if (!(tipv >= 0 && tipv <= 5)) return reply(c, 'bad', 'Érvénytelen borravaló.');
+    if (m.sig !== sigOf(p.sec, r.addr, amt, tipv)) return reply(c, 'bad', 'Hibás digitális aláírás! Az utalást elutasítottuk.');
+    if (p.bal - pendOut(p.addr) < amt + tipv) return reply(c, 'bad', 'Nincs elég szabad coinod.');
     if (H.mempool.filter(x => x.from === p.addr).length >= 3) return reply(c, 'bad', 'Egyszerre legfeljebb 3 utalásod várakozhat.');
     if (H.mempool.length >= 60) return reply(c, 'bad', 'Tele a várólista, előbb bányásszatok!');
-    H.mempool.push({id: rnd(8, HEX), from: p.addr, to: r.addr, amt, ts: Date.now()});
+    H.mempool.push({id: rnd(8, HEX), from: p.addr, to: r.addr, amt, tip: tipv, sig: m.sig.slice(0, 12), ts: Date.now()});
     reply(c, 'ok', `Elküldve: ${coin(amt)}. Most egy bányászra vár.`);
     makeTmpl(); return;
   }
@@ -590,18 +598,20 @@ function onHostMsg(c, m) {
     if (!t || !Number.isFinite(nonce)) return reply(c, 'late', 'Ez a blokk már elavult. Bányássz tovább!');
     if (t.prev !== tip().hash) return reply(c, 'late', `Lekésted! A #${t.height}. blokkot már más fűzte a lánchoz.`);
     const hash = blockHash(t, p.addr, nonce);
-    if (!hash.startsWith(PREFIX)) return reply(c, 'bad', 'Érvénytelen blokk: a hash nem 000-val kezdődik.');
+    if (!hash.startsWith(curPre())) return reply(c, 'bad', `Érvénytelen blokk: a hash nem ${curPre()}-val kezdődik.`);
     const txs = t.txs.map(id => H.mempool.find(x => x.id === id)).filter(Boolean), done = [];
+    let tips = 0;
     for (const x of txs) {
       const f = byAddr(x.from), r = byAddr(x.to);
-      if (f && r && f.bal >= x.amt) { f.bal -= x.amt; r.bal += x.amt; f.sent++; r.got++; done.push(x); }
+      const tp = x.tip || 0;
+      if (f && r && f.bal >= x.amt + tp) { f.bal -= x.amt + tp; r.bal += x.amt; tips += tp; f.sent++; r.got++; done.push(x); }
     }
-    p.bal += REWARD; p.mined++;
-    const b = {h: t.height, prev: t.prev, hash, nonce, miner: p.addr, txs: done, t: Date.now()};
+    const rw = curRew(t.height); payout(p, rw + tips); p.mined++;
+    const b = {h: t.height, prev: t.prev, hash, nonce, miner: p.addr, txs: done, rw, tips, pre: curPre(), t: Date.now()};
     H.chain.push(b);
     const ids = new Set(t.txs); H.mempool = H.mempool.filter(x => !ids.has(x.id));
     done.forEach(x => H.log.push({h: b.h, from: x.from, to: x.to, amt: x.amt}));
-    reply(c, 'win', `Megtaláltad a #${b.h}. blokkot! +${REWARD} coin jutalom`);
+    reply(c, 'win', `Megtaláltad a #${b.h}. blokkot! +${fmt(rw)} coin jutalom${tips ? ` + ${tips} borravaló` : ''}`);
     for (const x of done) {
       const r = byAddr(x.to), f = byAddr(x.from);
       if (r && r !== p) sendTo(r.tok, {t: 'toast', kind: 'in', msg: `Megérkezett ${coin(x.amt)} (#${b.h}. blokk)`});
@@ -622,10 +632,10 @@ function onHostMsg(c, m) {
     changed(); return;
   }
   if (m.t === 'fblock') {
-    if (H.phase !== 'play' || !F || F.tok !== p.tok || F.state !== 'run' || Math.floor(Number(m.k)) !== F.k) return;
+    if (H.phase !== 'play' || !F || !inF(p) || F.state !== 'run' || Math.floor(Number(m.k)) !== F.k) return;
     const hash = blockHash(fTmpl(), p.addr, Math.floor(Number(m.nonce)));
-    if (!hash.startsWith(PREFIX)) return reply(c, 'bad', 'Érvénytelen hamis blokk.');
-    F.prev = hash; F.k++;
+    if (!hash.startsWith(curPre())) return reply(c, 'bad', 'Érvénytelen hamis blokk.');
+    F.prev = hash; F.k++; F.cnt = F.cnt || {}; F.cnt[p.tok] = (F.cnt[p.tok] || 0) + 1;
     if (F.k >= fNeed()) return endForge('win');
     reply(c, 'win', `Hamis blokk kész: ${F.k} / ${fNeed()}`);
     changed(); return;
@@ -670,20 +680,20 @@ function startGuess() {
 }
 function makeTmpl(notify = true) {
   H.tid++;
-  const t = {tid: H.tid, height: H.chain.length, prev: tip().hash, txs: H.mempool.slice(0, MAXTX).map(x => x.id)};
+  const t = {tid: H.tid, height: H.chain.length, prev: tip().hash, txs: [...H.mempool].sort((a, b) => (b.tip || 0) - (a.tip || 0)).slice(0, MAXTX).map(x => x.id)};
   H.tmpls[H.tid] = t; delete H.tmpls[H.tid - 60]; H.tmpl = t;
   if (notify) changed();
 }
 function snapshot(p) {
   return {
-    t: 'state', phase: H.phase, code: H.code, prefix: PREFIX, reward: REWARD, batch: LEVELS[H.level].batch, tmpl: H.tmpl,
-    you: {nick: p.nick, addr: p.addr, bal: p.bal, mined: p.mined,
-      pend: H.mempool.filter(x => x.from === p.addr).map(x => ({to: x.to, amt: x.amt})),
+    t: 'state', phase: H.phase, code: H.code, prefix: curPre(), reward: curRew(), batch: LEVELS[H.level].batch * (p.rig || 1), tmpl: H.tmpl,
+    you: {nick: p.nick, addr: p.addr, bal: p.bal, mined: p.mined, sec: p.sec, rig: p.rig || 1,
+      pend: H.mempool.filter(x => x.from === p.addr).map(x => ({to: x.to, amt: x.amt + (x.tip || 0)})),
       inc: H.mempool.filter(x => x.to === p.addr).reduce((s, x) => s + x.amt, 0)},
     addrs: Object.values(H.players).filter(x => x !== p).map(x => x.addr).sort(),
     chain: H.chain.slice(-3).map(b => ({h: b.h, hash: b.hash, miner: b.miner, n: b.txs.length})),
     reveal: H.phase === 'reveal' ? Object.values(H.players).map(x => ({nick: x.nick, addr: x.addr, bal: x.bal, mined: x.mined})).sort((a, b) => b.bal - a.bal) : null,
-    forge: H.phase === 'play' && H.F && H.F.tok === p.tok && (H.F.state === 'pick' || H.F.state === 'run') ? {
+    forge: H.phase === 'play' && H.F && inF(p) && (H.F.state === 'pick' || H.F.state === 'run') ? {
       state: H.F.state, h: H.F.h, amt: H.F.amt, k: H.F.k, need: H.F.state === 'run' ? fNeed() : 0,
       tmpl: H.F.state === 'run' ? fTmpl() : null,
       blocks: H.chain.slice(1).slice(-5).map(b => ({h: b.h, n: b.txs.length}))} : null,
@@ -778,13 +788,13 @@ function renderHost() {
     seenH = tip().h;
     const mem = H.mempool;
     $('#hMemN').textContent = mem.length ? `(${mem.length})` : '';
-    $('#hMem').innerHTML = mem.length ? mem.slice(0, 7).map(x => `<div class="tx"><span>${esc(short(x.from))}</span><span class="arr">→</span><span>${esc(short(x.to))}</span><span class="amt">${coin(x.amt)}</span></div>`).join('') + (mem.length > 7 ? `<div class="empty">… és még ${mem.length - 7}</div>` : '')
+    $('#hMem').innerHTML = mem.length ? [...mem].sort((a, b) => (b.tip || 0) - (a.tip || 0)).slice(0, 7).map(x => `<div class="tx"><span>${esc(short(x.from))}</span><span class="arr">→</span><span>${esc(short(x.to))}</span><span class="amt">${coin(x.amt)}${x.tip ? ` +${x.tip}💰` : ''}${x.sig ? ' ✍️' : ''}</span></div>`).join('') + (mem.length > 7 ? `<div class="empty">… és még ${mem.length - 7}</div>` : '')
       : '<div class="empty">Nincs várakozó utalás. Küldjetek egymásnak coint!</div>';
     const rich = [...ps].sort((a, b) => b.bal - a.bal).slice(0, 8), max = Math.max(1, ...rich.map(p => p.bal));
     $('#hRich').innerHTML = rich.map((p, i) => `<div class="r"><span class="a">${esc(short(p.addr))}</span><span class="bar"><i style="width:${Math.round(p.bal / max * 100)}%"></i></span><span class="b">${coin(p.bal)}</span></div>`).join('') || '<div class="empty">Még nincs játékos.</div>';
     $('#hNext').textContent = `#${H.chain.length}. blokk`;
-    $('#hGoal').textContent = PREFIX + '…';
-    $('#hReward').textContent = coin(REWARD);
+    $('#hGoal').textContent = curPre() + '…';
+    $('#hReward').textContent = coin(curRew());
     $('#hInBlock').textContent = H.tmpl.txs.length;
     $('#hTxTotal').textContent = H.log.length;
     if ($('#hQR2').dataset.u !== url) { $('#hQR2').innerHTML = qrSVG(url, 4); $('#hQR2').dataset.u = url; }
@@ -1036,7 +1046,8 @@ $('#pAmts').addEventListener('click', e => {
 });
 $('#pSend').addEventListener('click', () => {
   if (!selTo || !selAmt || !conn || !conn.open) return;
-  try { conn.send({t: 'send', to: selTo, amt: selAmt}); } catch (e) { return toast('Nem sikerült elküldeni.', 'bad'); }
+  const tp = window.bcTip || 0;
+  try { conn.send({t: 'send', to: selTo, amt: selAmt, tip: tp, sig: sigOf(P.you.sec, selTo, selAmt, tp)}); } catch (e) { return toast('Nem sikerült elküldeni.', 'bad'); }
   selAmt = null; $('#pAmts').querySelectorAll('button').forEach(x => x.classList.remove('sel')); updSend();
 });
 
@@ -1149,6 +1160,11 @@ button.fxPop{animation:fxPop .35s ease}
     return o;
   }
   const round2 = n => Math.round(n * 100) / 100;
+  // játék-hírek: a valódi árra egy JÁTÉKBELI szorzót tesznek (a valódi ár is látszik)
+  const NEWS = [['BTC', .15, 'Egy robotkutya Bitcoint vett a csontjaiért! 🐶'], ['BTC', -.12, 'Elfelejtette a jelszavát a Bitcoin-király! 😱'], ['ETH', .2, 'Az Ethereum-sárkány aranytojást tojt! 🐉'], ['ETH', -.15, 'Az Ethereum-hajó zátonyra futott! 🚢'], ['XRP', .25, 'Az XRP-t a Holdon is elfogadják! 🌙'], ['XRP', -.2, 'Egy kalóz elásta az XRP-kincset! 🏴‍☠️']];
+  const nMod = s => H && H.news && H.news.sym === s && Date.now() < H.news.until ? H.news.mod : 0;
+  const gUsd = s => H.px[s].usd * (1 + nMod(s));
+  setInterval(() => { if (!H || H.phase !== 'play' || !H.px) return; const n = NEWS[Math.floor(Math.random() * NEWS.length)]; H.news = {sym: n[0], mod: n[1], txt: n[2], until: Date.now() + 60000}; changed(); }, 75000);
   // HOST: árfrissítés és üzenetek
   async function hostTick() {
     if (!H) return;
@@ -1170,11 +1186,11 @@ button.fxPop{animation:fxPop .35s ease}
         if (!(amt >= 1 && amt <= 1000)) return reply(c, 'bad', 'Érvénytelen összeg.');
         if (p.bal - pendOut(p.addr) < amt) return reply(c, 'bad', 'Nincs elég szabad coinod.');
         p.bal = round2(p.bal - amt);
-        p.hold[s] = (p.hold[s] || 0) + amt * COINUSD / px.usd;
+        p.hold[s] = (p.hold[s] || 0) + amt * COINUSD / gUsd(s);
         reply(c, 'ok', `Vettél ${coin(amt)} értékben ${s}-t! 🚀 HODL!`);
       } else {
         const q = p.hold[s] || 0; if (!q) return reply(c, 'bad', `Nincs ${s}-ed.`);
-        const val = round2(q * px.usd / COINUSD); p.hold[s] = 0; p.bal = round2(p.bal + val);
+        const val = round2(q * gUsd(s) / COINUSD); p.hold[s] = 0; p.bal = round2(p.bal + val);
         reply(c, 'ok', `Eladtad: +${coin(val)} 💰`);
       }
       changed(); return;
@@ -1182,7 +1198,7 @@ button.fxPop{animation:fxPop .35s ease}
     return _msg.apply(this, arguments);
   };
   const _snap = snapshot;
-  snapshot = function (p) { const s = _snap.apply(this, arguments); s.px = H.px || null; s.you.hold = p.hold || {}; return s; };
+  snapshot = function (p) { const s = _snap.apply(this, arguments); s.px = H.px ? Object.fromEntries(Object.entries(H.px).map(([k, v]) => [k, v && v.usd ? {...v, real: v.usd, usd: gUsd(k)} : v])) : null; s.news = H.news && Date.now() < H.news.until ? H.news : null; s.you.hold = p.hold || {}; return s; };
   // JÁTÉKOS: kártya a Bányászat alá
   const card = document.getElementById('bxCard'), mine = document.querySelector('#pPlay .mine') || document.querySelector('.card.mine');
   if (mine) mine.after(card);
@@ -1200,12 +1216,12 @@ button.fxPop{animation:fxPop .35s ease}
       const dir = lastPx[s] && x.usd !== lastPx[s] ? (x.usd > lastPx[s] ? 'up' : 'dn') : '';
       return `<div class="bxrow ${dir ? 'tick' : ''}"><div><div class="bxsym">${SYMS[s]}</div>
         <div class="bxpx">$${x.usd.toLocaleString('en-US', {maximumFractionDigits: x.usd < 10 ? 4 : 2})}
-        <span class="${x.ch24 >= 0 ? 'up' : 'dn'}">${x.ch24 >= 0 ? '▲' : '▼'}${Math.abs(x.ch24).toFixed(2)}% 24h</span></div></div>
+        ${x.real && x.real !== x.usd ? `<span class="lbl">(valódi: $${x.real.toLocaleString('en-US', {maximumFractionDigits: x.real < 10 ? 4 : 2})} · 🎲 játék-hatás ${x.usd > x.real ? '+' : ''}${Math.round((x.usd / x.real - 1) * 100)}%)</span> ` : ''}<span class="${x.ch24 >= 0 ? 'up' : 'dn'}">${x.ch24 >= 0 ? '▲' : '▼'}${Math.abs(x.ch24).toFixed(2)}% 24h</span></div></div>
         <div class="bxpx">${q ? `Nálad: <b style="color:var(--ink)">${val.toFixed(3)}</b> coin<br>${q.toPrecision(4)} ${s}` : ''}</div>
         <div class="bxbtn"><button type="button" data-bx="buy" data-s="${s}" data-a="1">+1</button><button type="button" data-bx="buy" data-s="${s}" data-a="5">+5</button>${q ? `<button type="button" class="btn-acc" data-bx="sell" data-s="${s}">Elad</button>` : ''}</div></div>`;
     }).join('');
     Object.keys(SYMS).forEach(s => { if (px[s]) lastPx[s] = px[s].usd; });
-    $('#bxInfo').textContent = `1 coin = $${COINUSD}. Portfólió: ${tot.toFixed(3)} coin · ár: ${new Date(px.t).toLocaleTimeString('hu-HU')}`;
+    $('#bxInfo').textContent = (P.news ? '📰 JÁTÉK-HÍR: ' + P.news.txt + ' (' + P.news.sym + ' ' + (P.news.mod > 0 ? '+' : '') + Math.round(P.news.mod * 100) + '% játékbeli hatás) · ' : '') + `1 coin = $${COINUSD}. Portfólió: ${tot.toFixed(3)} coin · ár: ${new Date(px.t).toLocaleTimeString('hu-HU')}`;
   };
   card.addEventListener('click', e => {
     const b = e.target.closest('button[data-bx]'); if (!b || !conn || !conn.open) return;
@@ -1330,5 +1346,143 @@ button.fxPop{animation:fxPop .35s ease}
   };
 })();
 </script>
+<style>
+/* 20 ötlet – 1. csomag: lánc-animáció, riasztás, gong, hash-gép, borravaló, pecsét */
+.chain .blk+.blk::before{height:8px;top:calc(50% - 2px);border-radius:4px;background:repeating-linear-gradient(90deg,var(--acc) 0 9px,transparent 9px 13px);transform-origin:left center}
+.blk.broke::before{animation:xBreak .7s .9s both}
+@keyframes xBreak{0%{transform:none}40%{transform:rotate(-30deg) scaleX(.6);background:var(--red)}100%{transform:rotate(35deg) scaleX(.45) translateY(14px);background:var(--red);opacity:.8}}
+.blk.boom{animation:xBoom 1s both;border-color:#FF2D2D;box-shadow:0 0 60px #FF2D2D}
+@keyframes xBoom{0%{transform:scale(1)}20%{transform:scale(1.18) rotate(-3deg);background:#FF2D2D}45%{transform:scale(.9) rotate(3deg)}100%{transform:scale(1)}}
+body.xAlarm::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:8000;box-shadow:inset 0 0 0 10px #FF2D2D,inset 0 0 120px rgba(255,45,45,.55);animation:xFlash 1s infinite alternate}
+@keyframes xFlash{from{opacity:.25}to{opacity:1}}
+#xAlarm{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:8001;width:min(720px,calc(100vw - 32px));background:#3A0D0D;border:3px solid #FF2D2D;border-top:0;border-radius:0 0 18px 18px;padding:10px 16px;color:#fff;font-weight:700}
+#xAlarm .r{display:grid;grid-template-columns:minmax(0,130px) 1fr 48px;gap:8px;align-items:center;margin-top:6px;font-size:15px}
+#xAlarm .bar{height:16px;background:#1a0a0a;border-radius:8px;overflow:hidden}#xAlarm .bar i{display:block;height:100%;transition:width .4s}
+#xGong{position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:8500;background:var(--card);border:4px solid var(--acc);border-radius:24px;padding:24px 36px;text-align:center;box-shadow:0 0 80px rgba(245,158,46,.6);animation:pop .4s both;pointer-events:none;max-width:calc(100vw - 32px)}
+#xGong h2{font-size:clamp(30px,4vw,60px)}#xGong .a{font:700 clamp(20px,2.4vw,40px) 'JetBrains Mono',monospace;color:var(--blu);word-break:break-all}
+.xc h3{font-size:20px;margin-bottom:8px}.xc .xb{display:flex;flex-direction:column;gap:10px}.xc p{margin:0}
+.xrow{display:flex;gap:8px;flex-wrap:wrap}.xrow button{flex:1 1 auto}.xrow button.sel{border-color:var(--blu);background:#163049}
+#xHashOut{font:13px 'JetBrains Mono',monospace;word-break:break-all;background:var(--bg);border-radius:10px;padding:10px}
+#xHashOut b{color:var(--acc)}
+#xHost{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:clamp(16px,1.6vw,28px)}
+#xHost .row{display:flex;justify-content:space-between;gap:8px}
+</style>
+<script>
+(function () {
+  /* közös segédek a további modulokhoz */
+  window.xT = (kid, teen, adult) => { const g = (H && H.age) || (P && P.age) || 'kid'; return g === 'adult' ? (adult || teen || kid) : g === 'teen' ? (teen || kid) : kid; };
+  window.xSet = (el, html) => { if (el && el._h !== html) { el._h = html; el.innerHTML = html; } };
+  window.xSend = m => { if (!conn || !conn.open) return toast('Nincs kapcsolat.', 'bad'); try { conn.send(m); } catch (e) { toast('Nem sikerült elküldeni.', 'bad'); } };
+  window.xBurst = (x, y, n, set) => { for (let i = 0; i < n; i++) { const e = document.createElement('div'), a = Math.random() * 6.28, d = 60 + Math.random() * 160; e.className = 'fxP'; e.textContent = set[i % set.length]; e.style.left = x + 'px'; e.style.top = y + 'px'; e.style.setProperty('--dx', Math.cos(a) * d + 'px'); e.style.setProperty('--dy', Math.sin(a) * d + 'px'); e.style.setProperty('--r', (Math.random() * 180 - 90) + 'deg'); document.body.appendChild(e); setTimeout(() => e.remove(), 1200); } };
+  const mk = (parent, id, title, cls) => { let e = document.getElementById(id); if (!e) { e = document.createElement('section'); e.className = cls || 'card xc'; e.id = id; e.innerHTML = `<h3>${title}</h3><div class="xb"></div>`; parent.appendChild(e); } return e.querySelector('.xb'); };
+  const top = document.createElement('div'); top.id = 'xTop'; top.style.cssText = 'display:flex;flex-direction:column;gap:14px'; top.hidden = true; $('#pLobby').after(top);
+  const wrap = document.createElement('div'); wrap.id = 'xWrap'; wrap.style.cssText = 'display:flex;flex-direction:column;gap:14px'; $('#pPlay').appendChild(wrap);
+  const hx = document.createElement('div'); hx.id = 'xHost'; $('#hPlay').appendChild(hx);
+  window.xCard = (id, title) => mk(wrap, id, title);
+  window.xTopCard = (id, title) => mk(top, id, title);
+  window.xHCard = (id, title) => mk(hx, id, title, 'card panel xc');
+
+  /* 14. automatikus nehézség (host): túl gyors blokk → 0000, túl lassú → egy nullával kevesebb (min. 00) */
+  function setPfx(n, why) { H.pfx = '0'.repeat(n); H.pfxAt = Date.now(); H.pfxWhy = why; makeTmpl(); }
+  let dSeen = -1;
+  setInterval(() => {
+    if (!H || H.phase !== 'play') return;
+    const b = tip(), L = curPre().length;
+    if (dSeen < 0 || b.h < dSeen) { dSeen = b.h; return; }
+    if (b.h > dSeen) { dSeen = b.h; const pb = H.chain[b.h - 1]; if (b.h > 1 && pb && b.t - pb.t < 10000 && L < 4) setPfx(L + 1, 'fast'); return; }
+    if (L > 2 && Date.now() - Math.max(b.t, H.pfxAt || 0) > 45000) setPfx(L - 1, 'slow');
+  }, 1000);
+
+  /* 13. blokk-gong */
+  let ac;
+  function gong() { try { ac = ac || new AudioContext(); [196, 392, 590].forEach((f, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; g.gain.setValueAtTime(.25 / (i + 1), ac.currentTime); g.gain.exponentialRampToValueAtTime(.001, ac.currentTime + 2.5); o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + 2.6); }); } catch (e) {} }
+  let gT;
+  function gongShow(b) {
+    gong(); let g = $('#xGong'); if (!g) { g = document.createElement('div'); g.id = 'xGong'; document.body.appendChild(g); }
+    g.innerHTML = `<h2>🔔 Új blokk: #${b.h}!</h2><p>Ezt a cím bányászta:</p><div class="a">${esc(b.miner || '')}</div><p>🤔 Ki lehet az? Tippeljétek meg!</p>`;
+    g.style.animation = 'none'; void g.offsetWidth; g.style.animation = ''; g.hidden = false;
+    clearTimeout(gT); gT = setTimeout(() => { g.hidden = true; }, 4500);
+  }
+
+  /* KIVETÍTŐ kirajzolás: 1. lánc-robbanás, 3. felezés-visszaszámláló, 13. gong, 19. riasztás */
+  let gSeen = -1, boomId = '', lastPfx = '';
+  const _rh = renderHost;
+  renderHost = function () {
+    _rh.apply(this, arguments);
+    if (!H) return;
+    const F = H.F, run = !!(H.phase === 'play' && F && F.state === 'run');
+    document.body.classList.toggle('xAlarm', run);
+    let al = $('#xAlarm');
+    if (run) {
+      if (!al) { al = document.createElement('div'); al.id = 'xAlarm'; document.body.appendChild(al); }
+      const fake = F.h + F.k, real = tip().h + 1, mx = Math.max(fake, real + 1);
+      const hon = H.chain.filter(b => b.t >= F.at).length, fk = Object.values(F.cnt || {}).reduce((a, b) => a + b, 0), sh = fk + hon ? Math.round(fk / (fk + hon) * 100) : 0;
+      xSet(al, `🚨 CSALÁS-RIASZTÁS! Valaki átírta a #${F.h}. blokkot!${(F.team || []).length ? ` (${1 + F.team.length} csaló egy csapatban)` : ''}
+        <div class="r"><span>😈 Hamis lánc</span><span class="bar"><i style="width:${fake / mx * 100}%;background:#FF2D2D"></i></span><span>${fake}</span></div>
+        <div class="r"><span>😇 Valódi lánc</span><span class="bar"><i style="width:${real / mx * 100}%;background:#4ADE80"></i></span><span>${real}</span></div>
+        <div class="r"><span>⚡ Csalók hash-ereje</span><span class="bar"><i style="width:${sh}%;background:#F59E2E"></i></span><span>${sh}%</span></div>`);
+      if (boomId !== F.id) {
+        boomId = F.id; xBurst(innerWidth / 2, 220, 24, ['💥', '🔥', '❌', '⛓️']);
+        mgSay('🚨 Csalás-riasztás!', xT('Valaki <b>átírt egy régi blokkot</b>! Ettől megváltozott a blokk ujjlenyomata (hash), ezért a lánc <b>elszakadt</b>. A csalónak mindent újra kell bányásznia. Bányásszatok gyorsan, hogy a becsületes lánc nyerjen!',
+          'Egy régi blokk tartalma megváltozott → új hash lett → a következő blokk „előző hash” mezője már nem egyezik, a lánc megszakad. A támadónak minden későbbi blokkot újra kell bányásznia, és le kell hagynia a becsületes láncot.',
+          'A leghosszabb (legtöbb munkát tartalmazó) lánc szabálya miatt a támadónak a módosított blokktól újra kell számolnia a proof-of-work-öt, és meg kell előznie a hálózatot: ehhez tartósan a hash-erő többsége kell (51%-os támadás).'));
+      }
+    } else if (al) al.remove();
+    if (H.phase !== 'play') return;
+    if (run) $('#hChain').querySelectorAll('.blk:not(.ghost)').forEach(el => { const h = +((el.querySelector('.bh').textContent.match(/\d+/) || [0])[0]); if (h === F.h) el.classList.add('boom'); else if (h > F.h) el.classList.add('broke'); });
+    let hr = $('#xHalv'); if (!hr) { hr = document.createElement('div'); hr.className = 'row'; hr.id = 'xHalv'; $('#hReward').parentElement.after(hr); }
+    const n = H.chain.length, left = 10 - ((n - 1) % 10);
+    hr.innerHTML = `<span>✂️ Felezésig</span><b>${left} blokk</b>`;
+    const t = tip();
+    if (gSeen >= 0 && t.h > gSeen) {
+      gongShow(t);
+      if (t.h % 10 === 0) setTimeout(() => mgSay('✂️ Felezés!', xT(`10 blokk után a bányász-jutalom <b>a felére csökken</b>: mostantól ${fmt(curRew())} coin jár. Így egyre kevesebb új coin születik, ezért ritka és értékes.`, `Halving: minden 10. blokk után feleződik a jutalom (most ${fmt(curRew())} coin). A Bitcoinnál ez kb. 4 évente történik.`, `Halving: a kibocsátás geometriai sorként csökken (5 + 2,5 + 1,25 + … → legfeljebb 10 × 10 coin). A Bitcoinnál 210 000 blokkonként, így a teljes mennyiség 21 millió alatt marad.`)), 4700);
+    }
+    gSeen = t.h;
+    if (curPre() !== lastPfx) {
+      if (lastPfx) mgSay('⚙️ Változott a nehézség', xT(H.pfxWhy === 'fast' ? `Túl gyorsan jöttek a blokkok, ezért most nehezebb: a hash-nek <b>${curPre()}</b>-val kell kezdődnie.` : `Sokáig nem talált senki blokkot, ezért könnyebb lett: elég, ha <b>${curPre()}</b>-val kezdődik.`,
+        `Nehézség-igazítás: a cél, hogy a blokkok egyenletes tempóban jöjjenek. Most: <b>${curPre()}</b>…`, `Difficulty adjustment: a hálózat a blokkidőhöz igazítja a célértéket (itt: <b>${curPre()}</b> előtag; egy nulla = 16× nehezebb). A Bitcoin 2016 blokkonként igazít.`));
+      lastPfx = curPre();
+    }
+  };
+
+  /* JÁTÉKOS: 2. hash-gép, 4. borravaló, 12. digitális pecsét */
+  const hb = xTopCard('xHashCard', '🔬 Hash-gép (játszótér)');
+  hb.innerHTML = `<p class="lbl">Írj be bármit! Már egyetlen betű is teljesen más „ujjlenyomatot” (SHA-256 hash-t) ad.</p><input id="xHashIn" maxlength="80" value="Szia, blokklánc!" aria-label="Szöveg a hash-géphez"><div id="xHashOut" aria-live="polite"></div>`;
+  let lastHash = '';
+  function hashUpd() {
+    const h = sha256($('#xHashIn').value);
+    $('#xHashOut').innerHTML = [...h].map((c, i) => lastHash && lastHash[i] !== c ? `<b>${c}</b>` : c).join('') + (lz(h) >= 2 ? `<br>🎉 ${lz(h)} nullával kezdődik! Bányász lehetnél!` : '');
+    lastHash = h;
+  }
+  $('#xHashIn').addEventListener('input', () => { hashUpd(); mgSay('Hash-gép', xT('A narancssárga betűk változtak meg. Egy kicsi változás a szövegben → <b>teljesen más hash</b>. Ezért vesszük észre, ha valaki átír egy blokkot!', 'Lavinahatás: egy bit változása a kimenet kb. felét megváltoztatja, és a hash-ből nem lehet visszafejteni a szöveget.', 'SHA-256: 256 bites, determinisztikus, egyirányú függvény, lavinahatással és ütközésállósággal. A bányászat a kimenet előtagjára vonatkozó „próbálgatás”.'), 'hashgep'); });
+  hashUpd();
+  const sendBtn = $('#pSend');
+  const tipRow = document.createElement('div'); tipRow.innerHTML = `<div class="lbl">Borravaló a bányásznak (gyorsabban bekerül):</div><div class="xrow" id="xTips"><button type="button" data-tip="0" class="sel">0</button><button type="button" data-tip="1">+1</button><button type="button" data-tip="2">+2</button></div>`;
+  sendBtn.before(tipRow); window.bcTip = 0;
+  $('#xTips').addEventListener('click', e => { const b = e.target.closest('button[data-tip]'); if (!b) return; window.bcTip = +b.dataset.tip; $('#xTips').querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
+    if (bcTip) mgSay('Borravaló 💰', xT('A borravalót az a bányász kapja, aki beteszi az utalásodat a blokkba. Egy blokkba csak <b>6 utalás</b> fér, ezért a bányászok a nagyobb borravalósakat választják előbb!', 'Tranzakciós díj: a blokk mérete korlátos, így a bányászok a nagyobb díjú tranzakciókat részesítik előnyben.', 'Fee market: a blokkhely szűkös erőforrás, a díj (fee/byte) dönti el a sorrendet; a jutalom felezésével hosszú távon a díjak tartják fenn a bányászatot.'), 'tip'); });
+  sendBtn.addEventListener('click', () => setTimeout(() => { if (!P || !P.you.sec) return;
+    mgSay('✍️ Lepecsételted!', xT('Az utalásodat a <b>titkos pecséteddel</b> írtad alá. A kivetítő ellenőrzi a pecsétet: így senki más nem küldhet pénzt a nevedben.', 'Digitális aláírás: a titkos kulcsoddal készül, a nyilvános címed alapján bárki ellenőrizheti, de hamisítani nem lehet.', 'Egyszerűsített demó: itt aláírás = SHA-256(titok|címzett|összeg|díj), amit a szerver ellenőriz. Valójában ECDSA/Schnorr: az aláírás a privát kulccsal készül, és a nyilvános kulccsal bárki ellenőrzi, a titok felfedése nélkül.')); }, 50));
+  let showSec = false;
+  const sigB = xCard('xSig', '🔐 A pecséted (kulcspár)');
+  sigB.addEventListener('click', e => { if (e.target.closest('[data-x="sec"]')) { showSec = !showSec; renderSig(); if (showSec) mgSay('Psszt! 🤫', 'Ezt a titkos pecsétet <b>soha senkinek ne mutasd meg</b>! Aki ismeri, a nevedben utalhat. A címedet nyugodtan megmondhatod.', 'sec'); } });
+  function renderSig() { if (!P || !P.you.sec) return; xSet(sigB, `<p><span class="lbl">Nyilvános címed (bárki láthatja):</span><br><span class="addr">${esc(P.you.addr)}</span></p>
+    <p><span class="lbl">Titkos pecséted (SOHA ne áruld el!):</span><br><span class="mono">${showSec ? esc(P.you.sec) : '●●●●●●●●●●●●'}</span> <button type="button" data-x="sec" style="min-height:36px;padding:0 12px">${showSec ? 'Elrejt' : 'Mutasd'}</button></p>
+    <p class="lbl">Minden utalásodat ezzel „lepecsételed” (aláírod). A kivetítő ellenőrzi.</p>`); }
+  let lastPre = '';
+  const _rp = renderPlayer;
+  renderPlayer = function (prev) {
+    _rp.apply(this, arguments);
+    $('#xTop').hidden = !(P.phase === 'lobby' || P.phase === 'play');
+    if (P.phase !== 'play') return;
+    $('#pMineHelp').innerHTML = `Minden koppintás ${fmt(P.batch)} nonce-t próbál ki. Akkor nyersz, ha a hash <b class="z">${esc(P.prefix)}</b>-val kezdődik. Jutalom most: <b>${fmt(P.reward)} coin</b>.`;
+    if (lastPre && P.prefix !== lastPre) mgSay('⚙️ Változott a nehézség', P.prefix.length > lastPre.length ? `Túl gyorsan jöttek a blokkok, ezért most <b>nehezebb</b>: ${esc(P.prefix)}-val kell kezdődnie a hash-nek.` : `Sokáig senki nem talált blokkot, ezért <b>könnyebb</b> lett: elég, ha ${esc(P.prefix)}-val kezdődik.`);
+    if (prev && prev.reward && P.reward < prev.reward) mgSay('✂️ Felezés!', `A bányász-jutalom a felére csökkent: most <b>${fmt(P.reward)} coin</b>. Így egyre kevesebb új coin születik.`);
+    lastPre = P.prefix; renderSig();
+  };
+})();
+</script>
+
 </body>
 </html>
