@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Blokklánc-játék</title>
+<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;700&display=swap">
@@ -418,7 +419,6 @@ select{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:
 </main>
 
 <script>
-{
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const PREFIX = '000', START = 10, REWARD = 5, MAXTX = 6, MAXP = 80, PFX = 'zqx-blokklanc-';
@@ -1077,7 +1077,6 @@ $('#resumeBtn').addEventListener('click', () => { const s = store.get('bc_host')
   }
   if (m) $('#hostCard').style.display = 'none';
 })();
-}
 </script>
 <style>
 /* gyerekbarát gomb-animációk */
@@ -1355,7 +1354,7 @@ button.fxPop{animation:fxPop .35s ease}
 @keyframes xBoom{0%{transform:scale(1)}20%{transform:scale(1.18) rotate(-3deg);background:#FF2D2D}45%{transform:scale(.9) rotate(3deg)}100%{transform:scale(1)}}
 body.xAlarm::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:8000;box-shadow:inset 0 0 0 10px #FF2D2D,inset 0 0 120px rgba(255,45,45,.55);animation:xFlash 1s infinite alternate}
 @keyframes xFlash{from{opacity:.25}to{opacity:1}}
-#xAlarm{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:8001;width:min(720px,calc(100vw - 32px));background:#3A0D0D;border:3px solid #FF2D2D;border-top:0;border-radius:0 0 18px 18px;padding:10px 16px;color:#fff;font-weight:700}
+#xAlarm{position:fixed;top:0;pointer-events:none;left:50%;transform:translateX(-50%);z-index:8001;width:min(720px,calc(100vw - 32px));background:#3A0D0D;border:3px solid #FF2D2D;border-top:0;border-radius:0 0 18px 18px;padding:10px 16px;color:#fff;font-weight:700}
 #xAlarm .r{display:grid;grid-template-columns:minmax(0,130px) 1fr 48px;gap:8px;align-items:center;margin-top:6px;font-size:15px}
 #xAlarm .bar{height:16px;background:#1a0a0a;border-radius:8px;overflow:hidden}#xAlarm .bar i{display:block;height:100%;transition:width .4s}
 #xGong{position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:8500;background:var(--card);border:4px solid var(--acc);border-radius:24px;padding:24px 36px;text-align:center;box-shadow:0 0 80px rgba(245,158,46,.6);animation:pop .4s both;pointer-events:none;max-width:calc(100vw - 32px)}
@@ -1375,7 +1374,7 @@ body.xAlarm::after{content:"";position:fixed;inset:0;pointer-events:none;z-index
   window.xSend = m => { if (!conn || !conn.open) return toast('Nincs kapcsolat.', 'bad'); try { conn.send(m); } catch (e) { toast('Nem sikerült elküldeni.', 'bad'); } };
   window.xBurst = (x, y, n, set) => { for (let i = 0; i < n; i++) { const e = document.createElement('div'), a = Math.random() * 6.28, d = 60 + Math.random() * 160; e.className = 'fxP'; e.textContent = set[i % set.length]; e.style.left = x + 'px'; e.style.top = y + 'px'; e.style.setProperty('--dx', Math.cos(a) * d + 'px'); e.style.setProperty('--dy', Math.sin(a) * d + 'px'); e.style.setProperty('--r', (Math.random() * 180 - 90) + 'deg'); document.body.appendChild(e); setTimeout(() => e.remove(), 1200); } };
   const mk = (parent, id, title, cls) => { let e = document.getElementById(id); if (!e) { e = document.createElement('section'); e.className = cls || 'card xc'; e.id = id; e.innerHTML = `<h3>${title}</h3><div class="xb"></div>`; parent.appendChild(e); } return e.querySelector('.xb'); };
-  const top = document.createElement('div'); top.id = 'xTop'; top.style.cssText = 'display:flex;flex-direction:column;gap:14px'; top.hidden = true; $('#pLobby').after(top);
+  const top = document.createElement('div'); top.id = 'xTop'; top.style.cssText = 'display:flex;flex-direction:column;gap:14px'; top.hidden = true; $('#pPlay').after(top);
   const wrap = document.createElement('div'); wrap.id = 'xWrap'; wrap.style.cssText = 'display:flex;flex-direction:column;gap:14px'; $('#pPlay').appendChild(wrap);
   const hx = document.createElement('div'); hx.id = 'xHost'; $('#hPlay').appendChild(hx);
   window.xCard = (id, title) => mk(wrap, id, title);
@@ -1839,6 +1838,54 @@ body.xAlarm::after{content:"";position:fixed;inset:0;pointer-events:none;z-index
     const a = document.createElement('a'); a.href = cv.toDataURL('image/png'); a.download = 'blokklanc-oklevel.png'; document.body.appendChild(a); a.click(); a.remove();
     mgSay('Oklevél 📜', 'Letöltötted az okleveledet! Ki is nyomtathatod.');
   }
+})();
+</script>
+
+<script>
+/* 20. Gyakorló mód: egy gépen fut a „kivetítő” motor is, hálózat (PeerJS) nélkül; 3 robot bányász ellen. */
+(function () {
+  const card = document.createElement('div'); card.className = 'card';
+  card.innerHTML = '<h2>🤖 Gyakorló mód</h2><p>Nincs kivetítő? Játssz egyedül 3 robot bányász ellen, internet nélkül is.</p><button type="button" id="xOffBtn">Gyakorlás indítása</button>';
+  $('.homegrid').appendChild(card);
+  let bots = [], bt = null;
+  const _sv = save; save = function () { if (H && H.offline) return; return _sv.apply(this, arguments); };
+  const _rh = renderHost; renderHost = function () { if (H && H.offline) return; return _rh.apply(this, arguments); };
+  function fake(tok, nick, toMe) {
+    const c = {open: true, _tok: null, close() {}, send: toMe ? m => { const x = JSON.parse(JSON.stringify(m)); setTimeout(() => onPMsg(x), 0); } : () => {}};
+    onHostMsg(c, {t: 'join', tok, nick}); return c;
+  }
+  function startOffline() {
+    const nick = ($('#inNick').value.replace(/\s+/g, ' ').trim() || 'Én').slice(0, 16), code = newCode();
+    H = {v: 1, code, phase: 'lobby', level: 'easy', players: {}, chain: [], mempool: [], tid: 0, tmpls: {}, tmpl: null, log: [], F: null, guess: {t: {}, a: {}}, at: Date.now(), offline: true};
+    H.chain.push({h: 0, prev: '0'.repeat(64), hash: sha256('genezis|' + code), txs: [], miner: null, nonce: 0, t: Date.now()});
+    makeTmpl(false); conns.clear();
+    const me = fake(TOKEN, nick, true);
+    conn = {open: true, close() {}, send: m => { const x = JSON.parse(JSON.stringify(m)); setTimeout(() => onHostMsg(me, x), 0); }};
+    bots = ['Robi 🤖', 'Bitbot 🦾', 'Csipcsip 🐤'].map((n, i) => ({c: fake('bot' + i + rnd(6, B32), n, false), nonce: i * 1e7}));
+    H.phase = 'play';
+    show('player'); $('#pNick').textContent = nick; $('#pDot').classList.add('on');
+    changed();
+    clearInterval(bt); bt = setInterval(botTick, 250);
+    let x = $('#xOffX'); if (!x) { x = document.createElement('button'); x.id = 'xOffX'; x.type = 'button'; x.textContent = 'Kilépés'; x.style.minHeight = '36px'; $('.phead').appendChild(x); x.onclick = () => location.reload(); }
+    setTimeout(() => mgSay('🤖 Gyakorló mód', xT('Most 3 robot bányász a vetélytársad! Koppints a BÁNYÁSZ gombra, és próbáld meg előttük megtalálni a jó hash-t. Minden más gomb is működik.', 'A telefonod most egyszerre a „kivetítő” (ő ellenőriz) és a bányász. A robotok valódi hash-eket számolnak.', 'Lokális szimuláció: ugyanaz a host-logika fut a böngészőben, a „hálózat” egy belső üzenetsor; a botok valódi SHA-256 PoW-t végeznek.')), 300);
+  }
+  function botTick() {
+    if (!H || !H.offline || H.phase !== 'play') return;
+    for (const b of bots) {
+      const p = H.players[b.c._tok], t = H.tmpl; if (!p) continue;
+      const F = H.F, fk = F && F.state === 'run' && inF(p);
+      for (let i = 0; i < 40; i++) {
+        const n = b.nonce++;
+        if (blockHash(fk ? fTmpl() : t, p.addr, n).startsWith(curPre())) { onHostMsg(b.c, fk ? {t: 'fblock', k: F.k, nonce: n} : {t: 'block', tid: t.tid, nonce: n}); break; }
+      }
+      if (Math.random() < .006) {
+        const to = Object.values(H.players).filter(x => x !== p)[Math.floor(Math.random() * 3)], tp = Math.floor(Math.random() * 3);
+        if (to && p.bal - pendOut(p.addr) >= 1 + tp) onHostMsg(b.c, {t: 'send', to: to.addr, amt: 1, tip: tp, sig: sigOf(p.sec, to.addr, 1, tp)});
+      }
+    }
+  }
+  $('#xOffBtn').addEventListener('click', startOffline);
+  window.xStartOffline = startOffline;
 })();
 </script>
 
