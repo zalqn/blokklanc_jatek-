@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: blokklanc-jatek
+    runtime: node
+    plan: free
+    buildCommand: echo ok
+    startCommand: npm start
