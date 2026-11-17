@@ -1484,5 +1484,182 @@ body.xAlarm::after{content:"";position:fixed;inset:0;pointer-events:none;z-index
 })();
 </script>
 
+<style>
+/* 2. csomag: bányagép-bolt, bányász-kör, pénztárca-kvíz, okos-szerződés, NFT */
+.xnft{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.xnft>div{background:var(--bg2);border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:6px;align-items:center;text-align:center;font-size:13px}
+.xnft svg{width:96px;height:96px;animation:xWig 2.4s ease-in-out infinite}
+.xnft button{min-height:36px;padding:0 10px;font-size:13px;width:100%}
+@keyframes xWig{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg) translateY(-3px)}}
+.xbet{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.xbet button{min-height:64px;font-size:18px;font-weight:700}
+</style>
+<script>
+(function () {
+  const RIGS = {laptop: ['💻 Laptop', 2, 5], gamer: ['🎮 Gamer-gép', 3, 12], super: ['🖥️ Szuperszámítógép', 5, 25]};
+  const POOLS = ['🐉 Sárkány', '🚀 Rakéta', '🦈 Cápa', '🦉 Bagoly'];
+  const BET = 2, MINT = 3, BUYBACK = 2, BETMS = 300000, BETOPEN = 120000;
+  const r2 = n => Math.round(n * 100) / 100, av = p => p.bal - pendOut(p.addr);
+  const mem = i => Object.values(H.players).filter(x => x.pool === i);
+  /* 18. hash → színes szörny (SVG). Ugyanaz a hash mindig ugyanazt a szörnyet adja. */
+  window.xMonster = id => {
+    const v = i => parseInt(id.slice(i, i + 2), 16), hue = v(0) * 360 / 255, eyes = 1 + v(2) % 3, horn = v(4) % 3, rx = 26 + v(6) % 14, ry = 24 + v(8) % 14, mouth = v(10) % 3, sp = v(12) % 4;
+    let s = `<svg viewBox="0 0 100 100" aria-label="NFT szörny ${id.slice(0, 6)}"><rect width="100" height="100" rx="18" fill="hsl(${(hue + 180) % 360},45%,18%)"/>`;
+    if (horn === 1) s += `<path d="M${50 - rx / 2} ${55 - ry} l-6 -16 l14 10 z M${50 + rx / 2} ${55 - ry} l6 -16 l-14 10 z" fill="hsl(${hue},80%,75%)"/>`;
+    if (horn === 2) s += `<line x1="50" y1="${55 - ry}" x2="50" y2="${40 - ry}" stroke="hsl(${hue},80%,75%)" stroke-width="3"/><circle cx="50" cy="${38 - ry}" r="5" fill="#FFC46B"/>`;
+    s += `<ellipse cx="50" cy="58" rx="${rx}" ry="${ry}" fill="hsl(${hue},75%,55%)"/>`;
+    for (let i = 0; i < sp; i++) s += `<circle cx="${36 + v(14 + i) % 28}" cy="${62 + v(13 + i) % 14}" r="3" fill="hsl(${hue},70%,40%)"/>`;
+    for (let i = 0; i < eyes; i++) { const x = 50 + (i - (eyes - 1) / 2) * 16; s += `<circle cx="${x}" cy="50" r="7" fill="#fff"/><circle cx="${x + 1}" cy="51" r="3.5" fill="#111"/>`; }
+    s += mouth === 0 ? `<path d="M38 68 q12 10 24 0" stroke="#111" stroke-width="3" fill="none"/>` : mouth === 1 ? `<ellipse cx="50" cy="70" rx="8" ry="5" fill="#111"/>` : `<path d="M38 68 h24 l-4 5 l-4 -5 l-4 5 l-4 -5 l-4 5 z" fill="#fff" stroke="#111"/>`;
+    return s + '</svg>';
+  };
+  /* HOST: üzenetek (mind itt ellenőrizve) */
+  const TYPES = new Set(['wq', 'rig', 'pool', 'bet', 'mint', 'nftsell', 'nftlist', 'nftbuy']);
+  const _msg = onHostMsg;
+  onHostMsg = function (c, m) {
+    if (!m || !TYPES.has(m.t)) return _msg.apply(this, arguments);
+    const p = c._tok && H.players[c._tok]; if (!p) return;
+    if (m.t === 'wq') {
+      if (p.wq) return; p.wq = 1;
+      if (Number(m.a) === 1) { p.bal = r2(p.bal + 1); p.wqOk = 1; reply(c, 'win', 'Helyes! +1 coin 🎉 A titkos pecsét a tiéd, senki másé!'); }
+      else reply(c, 'bad', 'Nem ez. A titkos pecsétet (jelszót, kulcsot) kell titokban tartani!');
+      return changed();
+    }
+    if (H.phase !== 'play') return reply(c, 'bad', 'Most nem lehet.');
+    if (m.t === 'rig') {
+      const r = RIGS[m.k]; if (!r) return;
+      if ((p.rig || 1) >= r[1]) return reply(c, 'bad', 'Ennél jobb géped már van.');
+      if (av(p) < r[2]) return reply(c, 'bad', 'Nincs elég szabad coinod.');
+      p.bal = r2(p.bal - r[2]); p.rig = r[1];
+      reply(c, 'ok', `${r[0]} megvéve! Most ×${r[1]} gyorsan bányászol.`); return changed();
+    }
+    if (m.t === 'pool') {
+      const i = Math.floor(Number(m.i));
+      if (i === -1) { p.pool = null; reply(c, 'ok', 'Kiléptél a körből.'); return changed(); }
+      if (!(i >= 0 && i < POOLS.length)) return;
+      if (p.pool !== i && mem(i).length >= 4) return reply(c, 'bad', 'Ez a kör tele van (max. 4 fő).');
+      p.pool = i; reply(c, 'ok', `Beléptél: ${POOLS[i]}!`); return changed();
+    }
+    if (m.t === 'bet') {
+      const side = m.side === 'up' ? 'up' : m.side === 'down' ? 'down' : null, now = Date.now();
+      if (!side) return;
+      if (!H.px || !H.px.BTC) return reply(c, 'bad', 'Még nincs BTC-árfolyam.');
+      if (!H.bet || H.bet.done) H.bet = {p0: H.px.BTC.usd, t0: now, until: now + BETMS, open: now + BETOPEN, st: {}};
+      const B = H.bet;
+      if (now > B.open) return reply(c, 'bad', 'Erre a körre már lezárult a fogadás.');
+      if (B.st[p.tok]) return reply(c, 'bad', 'Már fogadtál ebben a körben.');
+      if (av(p) < BET) return reply(c, 'bad', 'Nincs elég szabad coinod.');
+      p.bal = r2(p.bal - BET); B.st[p.tok] = {side, amt: BET};
+      reply(c, 'ok', `Fogadtál: a BTC ${side === 'up' ? 'FEL' : 'LE'} megy! (${BET} coin a szerződésben)`); return changed();
+    }
+    H.nfts = H.nfts || [];
+    const n = H.nfts.find(x => x.id === String(m.id));
+    if (m.t === 'mint') {
+      if (av(p) < MINT) return reply(c, 'bad', 'Nincs elég szabad coinod.');
+      if (H.nfts.filter(x => x.o === p.tok).length >= 4) return reply(c, 'bad', 'Legfeljebb 4 szörnyed lehet.');
+      p.bal = r2(p.bal - MINT);
+      const id = sha256(p.tok + '|' + H.nfts.length + '|' + Date.now() + '|' + Math.random()).slice(0, 16);
+      H.nfts.push({id, o: p.tok, pr: null}); reply(c, 'win', 'Új szörnyet vertél! 👾'); return changed();
+    }
+    if (!n) return reply(c, 'bad', 'Nincs ilyen szörny.');
+    if (m.t === 'nftsell') {
+      if (n.o !== p.tok) return;
+      H.nfts = H.nfts.filter(x => x !== n); p.bal = r2(p.bal + BUYBACK);
+      reply(c, 'ok', `A bank megvette a szörnyed: +${BUYBACK} coin`); return changed();
+    }
+    if (m.t === 'nftlist') {
+      if (n.o !== p.tok) return;
+      const pr = Math.floor(Number(m.pr)); n.pr = pr >= 1 && pr <= 50 ? pr : null;
+      reply(c, 'ok', n.pr ? `Kiraktad a piacra ${n.pr} coinért.` : 'Levetted a piacról.'); return changed();
+    }
+    if (m.t === 'nftbuy') {
+      if (n.o === p.tok || !n.pr) return reply(c, 'bad', 'Ez most nem eladó.');
+      const s = H.players[n.o]; if (!s) return;
+      if (av(p) < n.pr) return reply(c, 'bad', 'Nincs elég szabad coinod.');
+      p.bal = r2(p.bal - n.pr); s.bal = r2(s.bal + n.pr);
+      sendTo(s.tok, {t: 'toast', kind: 'in', msg: `Eladtad a szörnyed: +${n.pr} coin 👾`});
+      n.o = p.tok; n.pr = null; reply(c, 'win', 'Megvetted a szörnyet! 👾'); return changed();
+    }
+  };
+  /* 6. bányász-kör: a jutalom egyenlően oszlik a kör tagjai közt */
+  const _po = payout;
+  payout = function (p, amt) {
+    const ms = p.pool != null ? mem(p.pool) : [];
+    if (ms.length < 2) return _po.apply(this, arguments);
+    const sh = Math.floor(amt / ms.length * 100) / 100;
+    ms.forEach(x => { x.bal = r2(x.bal + sh); if (x !== p) sendTo(x.tok, {t: 'toast', kind: 'in', msg: `${POOLS[p.pool]} köröd blokkot talált! +${fmt(sh)} coin`}); });
+    p.bal = r2(p.bal + amt - sh * ms.length);
+    H.poolB = H.poolB || {}; H.poolB[p.pool] = (H.poolB[p.pool] || 0) + 1;
+  };
+  /* 17. okos-szerződés: lejáratkor a host a VALÓDI BTC-ár alapján automatikusan fizet */
+  setInterval(() => {
+    const B = H && H.bet; if (!B || B.done || Date.now() < B.until || !H.px || !H.px.BTC) return;
+    const p1 = H.px.BTC.usd, win = p1 > B.p0 ? 'up' : p1 < B.p0 ? 'down' : null;
+    const all = Object.entries(B.st), pot = all.reduce((s, [, x]) => s + x.amt, 0), ws = all.filter(([, x]) => x.side === win), wsum = ws.reduce((s, [, x]) => s + x.amt, 0);
+    for (const [tok, x] of all) {
+      const p = H.players[tok]; if (!p) continue;
+      const got = !ws.length ? x.amt : x.side === win ? Math.floor(pot * x.amt / wsum * 100) / 100 : 0;
+      p.bal = r2(p.bal + got);
+      sendTo(tok, {t: 'toast', kind: got > x.amt ? 'win' : got ? 'in' : 'bad', msg: `Okos-szerződés lejárt: a BTC ${win === 'up' ? 'FELMENT' : win ? 'LEMENT' : 'nem mozdult'}. ${got ? '+' + fmt(got) + ' coin' : 'Most nem nyertél.'}`});
+    }
+    B.done = true; B.p1 = p1; B.win = win; changed();
+  }, 2000);
+  const _snap = snapshot;
+  snapshot = function (p) {
+    const s = _snap.apply(this, arguments), B = H.bet;
+    s.age = H.age || 'kid';
+    s.you.wq = !!p.wq; s.you.pool = p.pool == null ? null : p.pool;
+    s.pools = POOLS.map((n, i) => ({n, c: mem(i).length, b: (H.poolB || {})[i] || 0}));
+    s.bet = B ? {p0: B.p0, p1: B.p1 || null, win: B.win || null, until: B.until, open: B.open, done: !!B.done, up: Object.values(B.st).filter(x => x.side === 'up').length, dn: Object.values(B.st).filter(x => x.side === 'down').length, mine: (B.st[p.tok] || {}).side || null} : null;
+    const N = H.nfts || [];
+    s.nft = {mine: N.filter(x => x.o === p.tok).map(x => ({id: x.id, pr: x.pr})), mkt: N.filter(x => x.o !== p.tok && x.pr).map(x => ({id: x.id, pr: x.pr, o: (H.players[x.o] || {}).addr || ''}))};
+    return s;
+  };
+  /* KIVETÍTŐ: körök, szerződés, NFT-k */
+  const _rh = renderHost;
+  renderHost = function () {
+    _rh.apply(this, arguments);
+    if (!H || H.phase !== 'play') return;
+    xSet(xHCard('xHPool', '⛏️ Bányász-körök'), POOLS.map((n, i) => `<div class="row"><span>${n}</span><b>${mem(i).length} fő · ${(H.poolB || {})[i] || 0} blokk</b></div>`).join('') + '<p class="hint">A kör tagjai együtt bányásznak, és elosztják a jutalmat.</p>');
+    const B = H.bet;
+    xSet(xHCard('xHBet', '📜 Okos-szerződés: BTC fel vagy le?'), !B ? '<p class="hint">Még nincs fogadás. Telefonon lehet indítani.</p>'
+      : `<div class="row"><span>Kezdő ár</span><b>$${B.p0.toLocaleString('en-US')}</b></div><div class="row"><span>📈 FEL / 📉 LE</span><b>${Object.values(B.st).filter(x => x.side === 'up').length} / ${Object.values(B.st).filter(x => x.side === 'down').length}</b></div>
+         <div class="row"><span>${B.done ? 'Eredmény' : 'Lejár'}</span><b>${B.done ? (B.win === 'up' ? '📈 FELMENT' : B.win ? '📉 LEMENT' : 'döntetlen') + ' ($' + B.p1.toLocaleString('en-US') + ')' : new Date(B.until).toLocaleTimeString('hu-HU')}</b></div>`);
+    xSet(xHCard('xHNft', '👾 NFT-szörnyek'), `<div class="xnft">${(H.nfts || []).slice(-6).map(x => `<div>${xMonster(x.id)}<span class="mono">${x.id.slice(0, 6)}</span></div>`).join('') || '<p class="hint">Még senki nem vert szörnyet.</p>'}</div>`);
+  };
+  /* JÁTÉKOS */
+  const qB = xTopCard('xWq', '🔐 Pénztárca-kvíz: +1 coin!');
+  qB.innerHTML = `<p>Mit nem szabad <b>soha</b> senkinek elárulni?</p><div class="xrow" style="flex-direction:column"><button type="button" data-wq="0">A címemet (bc1q…)</button><button type="button" data-wq="1">A titkos pecsétemet / jelszavamat</button><button type="button" data-wq="2">A kedvenc színemet</button></div>`;
+  qB.addEventListener('click', e => { const b = e.target.closest('[data-wq]'); if (!b) return; xSend({t: 'wq', a: +b.dataset.wq});
+    mgSay('Pénztárca-titok', xT('A <b>címedet</b> bárki tudhatja, olyan, mint a postaláda. A <b>titkos pecsét</b> (privát kulcs) a kulcs a ládához: aki megszerzi, elviheti a pénzed!', 'A cím (nyilvános kulcsból képzett) nyilvános, a privát kulcs vagy a seed-mondat titok: aki ismeri, teljes hozzáférést kap.', 'Önkezelt tárcánál a privát kulcs/seed az egyetlen jogosultság-igazolás; nincs „elfelejtett jelszó”. Csalók ezért adathalászattal ezt próbálják megszerezni.')); });
+  const rigB = xCard('xRig', '🛠️ Bányagép-bolt'), poolB = xCard('xPool', '🤝 Bányász-kör'), betB = xCard('xBet', '📜 Okos-szerződés: BTC 5 perc múlva?'), nftB = xCard('xNft', '👾 NFT-szörnyek');
+  const _rp = renderPlayer;
+  renderPlayer = function () {
+    _rp.apply(this, arguments);
+    $('#xWq').hidden = !!P.you.wq;
+    if (P.phase !== 'play') return;
+    const y = P.you, avail = y.bal - y.pend.reduce((s, x) => s + x.amt, 0);
+    xSet(rigB, `<p class="lbl">Jobb gép = több próba koppintásonként. Most: <b>×${y.rig}</b></p><div class="xrow">${Object.entries(RIGS).map(([k, r]) => `<button type="button" data-rig="${k}" ${y.rig >= r[1] || avail < r[2] ? 'disabled' : ''}>${r[0]}<br><small>×${r[1]} · ${r[2]} coin</small></button>`).join('')}</div>`);
+    xSet(poolB, `<p class="lbl">Lépj be egy körbe (2–4 fő): ha bárki blokkot talál, a jutalmat elosztjátok.</p><div class="xrow">${P.pools.map((x, i) => `<button type="button" data-pool="${i}" class="${y.pool === i ? 'sel' : ''}">${x.n}<br><small>${x.c}/4 fő · ${x.b} blokk</small></button>`).join('')}</div>${y.pool != null ? '<button type="button" data-pool="-1">Kilépek a körből</button>' : ''}`);
+    const B = P.bet, open = !B || B.done || Date.now() < B.open;
+    xSet(betB, `<p class="lbl">Tét: ${BET} coin. Ha eltalálod, a vesztesek tétjét is megkapod. A kivetítő 5 perc múlva a <b>valódi</b> BTC-ár alapján magától fizet.</p>
+      ${B && !B.done ? `<p>Kezdő ár: <b>$${B.p0.toLocaleString('en-US')}</b> · lejár: ${new Date(B.until).toLocaleTimeString('hu-HU')} · 📈${B.up} / 📉${B.dn}${B.mine ? ` · <b>Te: ${B.mine === 'up' ? 'FEL' : 'LE'}</b>` : ''}</p>` : B && B.done ? `<p>Előző kör: ${B.win === 'up' ? '📈 felment' : B.win ? '📉 lement' : 'döntetlen'}</p>` : ''}
+      ${open && !(B && !B.done && B.mine) ? `<div class="xbet"><button type="button" data-bet="up" ${avail < BET ? 'disabled' : ''}>📈 FEL</button><button type="button" data-bet="down" ${avail < BET ? 'disabled' : ''}>📉 LE</button></div>` : B && !B.done && !B.mine ? '<p class="lbl">Erre a körre lezárult a fogadás.</p>' : ''}`);
+    xSet(nftB, `<p class="lbl">Verj egy egyedi szörnyet ${MINT} coinért! A kinézetét a hash-e adja, ezért nincs két egyforma.</p><button type="button" data-nft="mint" ${avail < MINT ? 'disabled' : ''}>✨ Szörnyet verek (${MINT} coin)</button>
+      ${P.nft.mine.length ? `<div class="lbl">A te szörnyeid:</div><div class="xnft">${P.nft.mine.map(n => `<div>${xMonster(n.id)}<span class="mono">${n.id.slice(0, 6)}</span>${n.pr ? `<span>Piacon: ${n.pr} coin</span><button type="button" data-nft="unlist" data-id="${n.id}">Levesz</button>` : `<button type="button" data-nft="list" data-id="${n.id}">Piacra 5-ért</button>`}<button type="button" data-nft="sell" data-id="${n.id}">Banknak ${BUYBACK}-ért</button></div>`).join('')}</div>` : ''}
+      ${P.nft.mkt.length ? `<div class="lbl">Piac:</div><div class="xnft">${P.nft.mkt.map(n => `<div>${xMonster(n.id)}<span class="mono">${esc(short(n.o))}</span><button type="button" class="btn-acc" data-nft="buy" data-id="${n.id}" ${avail < n.pr ? 'disabled' : ''}>Megveszem: ${n.pr}</button></div>`).join('')}</div>` : ''}`);
+  };
+  $('#xWrap').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    const d = b.dataset;
+    if (d.rig) { xSend({t: 'rig', k: d.rig}); mgSay('Bányagép 🛠️', xT('Egy erősebb gép egy koppintásra <b>több nonce-t</b> próbál ki, így nagyobb eséllyel találsz jó hash-t. Az igazi bányászok is erős gépeket vesznek, és sok áramot fogyasztanak.', 'Több hash/s = arányosan nagyobb esély a blokkra. A valódi bányászatban ASIC-gépek versenyeznek.', 'A blokk-találat valószínűsége a hálózati hash-erőhöz viszonyított részesedéssel arányos; a bányászat költsége (hardver + áram) adja a proof-of-work biztonságát.'), 'rig'); }
+    else if (d.pool) { xSend({t: 'pool', i: +d.pool}); if (+d.pool >= 0) mgSay('Bányász-kör 🤝', xT('Egyedül ritkán nyersz, de ha négyen együtt bányásztok, <b>gyakrabban</b> jön jutalom, csak kisebb részekben. Ezt hívják <b>mining poolnak</b>.', 'Mining pool: a résztvevők összeadják a hash-erejüket, és a jutalmat elosztják. Kisebb ingadozás, ugyanakkora várható érték.', 'Pool: varianciacsökkentés; a valóságban a hozzájárulást „share”-ekkel mérik (PPS/PPLNS). Itt egyszerűen egyenlő osztás.'), 'pool'); }
+    else if (d.bet) { xSend({t: 'bet', side: d.bet}); mgSay('Okos-szerződés 📜', xT('Ez egy <b>program</b>, ami magától fizet: senki nem tudja megváltoztatni. 5 perc múlva megnézi a valódi Bitcoin-árat, és kifizeti azokat, akiknek igazuk lett.', 'Smart contract: előre megírt szabály a blokkláncon, ami automatikusan teljesül. Az árat egy „orákulum” (itt: a kivetítő) adja.', 'Az okos-szerződés determinisztikus kód; a külső adat (ár) egy orákulumon keresztül érkezik, ami bizalmi pont. Itt a host játssza a láncot és az orákulumot is.'), 'bet'); }
+    else if (d.nft) { const id = d.id; xSend(d.nft === 'mint' ? {t: 'mint'} : d.nft === 'sell' ? {t: 'nftsell', id} : d.nft === 'buy' ? {t: 'nftbuy', id} : {t: 'nftlist', id, pr: d.nft === 'list' ? 5 : 0});
+      if (d.nft === 'mint') mgSay('NFT-szörny 👾', xT('Az NFT egy <b>egyedi</b> dolog a láncon. A szörnyed kinézetét a <b>hash-e</b> határozza meg, ezért mindenki láthatja, hogy a tiéd, és nincs belőle másik.', 'NFT = nem helyettesíthető token: egyedi azonosító, amelynek tulajdonosa a láncon nyilvántartott.', 'Az NFT egy token-azonosító + tulajdonos-bejegyzés; a kép itt determinisztikusan a hash-ből generálódik (on-chain art). Az érték a keresleten múlik, nem a képen.'), 'nft'); }
+  });
+})();
+</script>
+
 </body>
 </html>
