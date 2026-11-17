@@ -1661,5 +1661,186 @@ body.xAlarm::after{content:"";position:fixed;inset:0;pointer-events:none;z-index
 })();
 </script>
 
+<style>
+/* 3. csomag: hamisblokk-kereső, jelvények, oklevél, korosztály, összefoglaló+kvíz, visszajátszás, 51% csapat */
+#xDet{position:fixed;inset:auto 16px 16px 16px;z-index:8400;background:var(--card);border:4px solid var(--blu);border-radius:22px;padding:18px;box-shadow:0 0 60px rgba(92,192,245,.4);animation:rise .4s both}
+#xDet .ds{display:flex;gap:28px;overflow-x:auto;padding:6px}
+#xDet .db{flex:0 0 190px;background:var(--bg2);border:2px solid var(--line);border-radius:14px;padding:10px;font:15px 'JetBrains Mono',monospace;position:relative}
+#xDet .db+.db::before{content:"🔗";position:absolute;left:-26px;top:40%}
+#xDet .db.bad{border-color:var(--red);background:#3A1820;animation:shake .5s both}
+.xdb{display:flex;flex-direction:column;gap:8px}
+.xdb button{text-align:left;font:14px 'JetBrains Mono',monospace;padding:8px 12px}
+#xRep{position:fixed;inset:0;z-index:9500;background:rgba(14,20,32,.97);padding:24px 16px;overflow:auto;display:flex;flex-direction:column;gap:14px}
+#xRep .rs{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+#xRep .rb{width:64px;height:64px;border-radius:12px;display:grid;place-items:center;font:700 16px 'Space Grotesk',sans-serif;color:#0E1420;animation:pop .3s both;position:relative}
+#xRep .rb.boom{animation:xBoom 1s both;outline:4px solid #FF2D2D}
+#xRep .tag{font:700 15px Inter,sans-serif;color:var(--acc);animation:pop .3s both}
+#xRep .tag.r{color:var(--red)}
+.xbadges{display:flex;flex-wrap:wrap;gap:6px}.xbadges span{background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:.9em}
+.xlb{display:flex;flex-direction:column;gap:8px}.xlb>div{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--card);border:2px solid var(--line);border-radius:14px;padding:8px 12px}
+.xq button.ok{border-color:var(--grn);background:#12321F}.xq button.no{border-color:var(--red);background:#3A1820}
+#xAtk{border-color:var(--red);background:#2A1216}
+</style>
+<script>
+(function () {
+  const r2 = n => Math.round(n * 100) / 100;
+  /* jelvények (host számolja) */
+  function badges(p) {
+    const ps = Object.values(H.players), mx = Math.max(...ps.map(x => x.bal)), b = [];
+    if (p.mined) b.push('⛏️ Első blokk');
+    if (Object.values(p.hold || {}).some(v => v > 0)) b.push('💎 Gyémánt kéz');
+    if (p.guard) b.push('👮 Csalófogó');
+    if (ps.length > 1 && p.bal === mx) b.push('🐋 Bálna');
+    if ((H.nfts || []).some(x => x.o === p.tok)) b.push('🖼️ Művész');
+    if (p.det) b.push('🔍 Detektív');
+    if (p.wqOk) b.push('🔐 Titoktartó');
+    return b;
+  }
+  /* 15. 51%-os támadás csapatban + jelvény/visszajátszás-napló */
+  const _ef = endForge;
+  endForge = function (r) {
+    const F = H.F;
+    if (F) {
+      if (F.h) (H.evs = H.evs || []).push({at: tip().h, h: F.h, r, amt: F.amt});
+      if (r === 'win') (F.team || []).forEach(t => { const x = H.players[t]; if (x) x.bal = r2(x.bal + 1); });
+      if (r === 'fail' && F.state === 'run') H.chain.filter(b => b.t >= F.at && b.h > 0).forEach(b => { const x = byAddr(b.miner); if (x && !inF(x)) x.guard = 1; });
+    }
+    return _ef.apply(this, arguments);
+  };
+  /* 8. hamisblokk-kereső */
+  function startDet() {
+    const bl = []; let pv = sha256('det' + Math.random());
+    for (let i = 0; i < 5; i++) { const hash = sha256(pv + '|' + i + Math.random()); bl.push({h: i + 1, prev: pv, hash}); pv = hash; }
+    const bad = 1 + Math.floor(Math.random() * 4); bl[bad].prev = sha256('hamis' + Math.random());
+    H.D = {id: rnd(6, HEX), bl, bad, until: Date.now() + 90000, win: null, wrong: []};
+    changed();
+    mgSay('🔍 Hamisblokk-kereső', xT('Nézzétek meg a blokkokat! Minden blokkban benne van az <b>előző blokk hash-e</b>. Az egyiknél ez <b>nem egyezik</b>. Aki elsőként rábök a telefonján, kap 1 coint!', 'Ellenőrizzétek: a blokk „előző” mezője egyezik-e az előtte lévő blokk hash-ével? Ahol nem, ott hamis a lánc.', 'Láncellenőrzés: minden csomópont ellenőrzi, hogy prev(i) == hash(i−1). Egyetlen eltérés érvényteleníti a láncot onnantól.'));
+  }
+  setInterval(() => { if (H && H.D && !H.D.win && Date.now() > H.D.until) { H.D = null; changed(); } }, 2000);
+  const TYPES = new Set(['det', 'fjoin']);
+  const _msg = onHostMsg;
+  onHostMsg = function (c, m) {
+    if (!m || !TYPES.has(m.t)) return _msg.apply(this, arguments);
+    const p = c._tok && H.players[c._tok]; if (!p || H.phase !== 'play') return;
+    if (m.t === 'det') {
+      const D = H.D; if (!D || D.win || D.id !== m.id || D.wrong.includes(p.tok)) return;
+      if (Math.floor(Number(m.i)) !== D.bad) { D.wrong.push(p.tok); reply(c, 'bad', 'Nem az! Hasonlítsd össze az „előző” mezőt az előtte lévő blokk hash-ével.'); return changed(); }
+      D.win = p.addr; p.bal = r2(p.bal + 1); p.det = 1; reply(c, 'win', 'Megtaláltad a hamis blokkot! +1 coin 🔍');
+      setTimeout(() => { if (H.D === D) { H.D = null; changed(); } }, 8000);
+      return changed();
+    }
+    if (m.t === 'fjoin') {
+      const F = H.F; if (!F || F.state !== 'run' || inF(p)) return;
+      (F.team = F.team || []).push(p.tok);
+      reply(c, 'bad', 'Beálltál a csalók közé! 😈 A BÁNYÁSZ gomb most a hamis láncot számolja.'); return changed();
+    }
+  };
+  const _snap = snapshot;
+  snapshot = function (p) {
+    const s = _snap.apply(this, arguments), D = H.D, F = H.F;
+    s.det = H.phase === 'play' && D ? {id: D.id, bl: D.bl.map(b => ({h: b.h, hash: b.hash.slice(0, 6), prev: b.prev.slice(0, 6)})), win: !!D.win, wrong: D.wrong.includes(p.tok)} : null;
+    s.fOpen = H.phase === 'play' && F && F.state === 'run' && !inF(p) ? {h: F.h, n: 1 + (F.team || []).length} : null;
+    if (H.phase === 'reveal') { s.you.badges = badges(p); s.sum = {blocks: tip().h, txs: H.log.length, halv: Math.floor(tip().h / 10), evs: (H.evs || []).length}; }
+    return s;
+  };
+  /* KIVETÍTŐ */
+  const dBtn = document.createElement('button'); dBtn.type = 'button'; dBtn.id = 'xDetBtn'; dBtn.textContent = '🔍 Hamisblokk-kereső'; $('#hForge').before(dBtn);
+  dBtn.addEventListener('click', () => { if (H && H.phase === 'play' && !H.D) startDet(); });
+  const ageRow = document.createElement('div'); ageRow.className = 'setrow'; ageRow.innerHTML = '<span>Magyarázatok szintje:</span><span id="xAge"></span>'; $('#hLevels').parentElement.after(ageRow);
+  const AGES = {kid: '🧒 8 éves', teen: '🧑 Kamasz', adult: '🧔 Felnőtt'};
+  $('#xAge').addEventListener('click', e => { const b = e.target.closest('button[data-age]'); if (b && H) { H.age = b.dataset.age; changed(); } });
+  const rx = document.createElement('div'); rx.id = 'xRevX'; rx.style.cssText = 'display:flex;flex-direction:column;gap:14px'; $('#hForgeRes').after(rx);
+  rx.addEventListener('click', e => { if (e.target.closest('#xRepBtn')) replay(); });
+  const _rh = renderHost;
+  renderHost = function () {
+    _rh.apply(this, arguments);
+    if (!H) return;
+    dBtn.hidden = H.phase !== 'play'; dBtn.disabled = !!H.D;
+    xSet($('#xAge'), Object.entries(AGES).map(([k, v]) => `<button type="button" data-age="${k}" class="${(H.age || 'kid') === k ? 'sel' : ''}">${v}</button>`).join(' '));
+    let o = $('#xDet'); const D = H.phase === 'play' && H.D;
+    if (!D) { if (o) o.remove(); }
+    else {
+      if (!o) { o = document.createElement('div'); o.id = 'xDet'; document.body.appendChild(o); }
+      xSet(o, `<h2>🔍 Melyik blokk hamis? Bökj rá a telefonodon!</h2><div class="ds">${D.bl.map((b, i) => `<div class="db${D.win && i === D.bad ? ' bad' : ''}"><b>#${b.h}</b><br>hash: <span class="z">${b.hash.slice(0, 6)}</span><br>előző: ${i ? b.prev.slice(0, 6) : '—'}</div>`).join('')}</div>
+        <p>${D.win ? `🎉 Megtalálta: <b class="mono">${esc(short(D.win))}</b> (+1 coin). A #${D.bad + 1}. blokk „előző” mezője nem egyezett!` : `${D.wrong.length} rossz tipp eddig.`}</p>`);
+    }
+    if (H.phase === 'reveal') {
+      const ps = Object.values(H.players).sort((a, b) => b.bal - a.bal);
+      xSet(rx, `<section class="card panel"><h3>📊 Összefoglaló</h3><p>${tip().h} blokk · ${H.log.length} utalás · ${Math.floor(tip().h / 10)} felezés · jutalom most ${fmt(curRew())} coin · nehézség ${curPre()} · ${(H.evs || []).length} csalási kísérlet · ${(H.nfts || []).length} NFT</p>
+        <p>${xT('Láttuk: a blokkok egymásra épülnek, a hash ujjlenyomatként védi őket, és csalni csak nagyon sok munkával lehetne.', 'Láttuk a proof-of-work-öt, a díjpiacot, a felezést és azt, miért nehéz átírni a láncot.', 'Bemutattuk: PoW, nehézség-igazítás, halving, fee market, digitális aláírás (egyszerűsítve), okos-szerződés orákulummal, NFT és 51%-os támadás.')}</p>
+        <button type="button" id="xRepBtn" class="btn-acc">▶️ Visszajátszás</button></section>
+        <section class="card panel"><h3>🏅 Jelvények</h3><div class="xlb">${ps.map((p, i) => `<div><b>${i + 1}.</b><span><b>${esc(p.nick)}</b><span class="xbadges">${badges(p).map(x => `<span>${x}</span>`).join('')}</span></span><b>${coin(r2(p.bal))}</b></div>`).join('')}</div></section>`);
+    }
+  };
+  /* 11. visszajátszás */
+  function replay() {
+    let o = $('#xRep'); if (o) o.remove();
+    o = document.createElement('div'); o.id = 'xRep';
+    o.innerHTML = '<div style="display:flex;justify-content:space-between;gap:10px"><h2>▶️ Így nőtt a lánc</h2><button type="button" id="xRepX">Bezár ✕</button></div><div class="rs" id="xRs"></div>';
+    document.body.appendChild(o); $('#xRepX').onclick = () => { clearInterval(tm); o.remove(); };
+    const ch = H.chain, evs = H.evs || [], rs = $('#xRs'); let i = 0;
+    const tm = setInterval(() => {
+      if (i >= ch.length) { clearInterval(tm); rs.insertAdjacentHTML('beforeend', '<span class="tag">🏁 Vége!</span>'); return; }
+      const b = ch[i], pb = ch[i - 1];
+      if (pb && b.rw && pb.rw && b.rw < pb.rw) rs.insertAdjacentHTML('beforeend', `<span class="tag">✂️ Felezés → ${fmt(b.rw)}</span>`);
+      if (pb && b.pre && pb.pre && b.pre !== pb.pre) rs.insertAdjacentHTML('beforeend', `<span class="tag">⚙️ ${b.pre}</span>`);
+      const hue = b.miner ? parseInt(sha256(b.miner).slice(0, 2), 16) * 360 / 255 : 40;
+      rs.insertAdjacentHTML('beforeend', `<div class="rb" id="xRb${b.h}" style="background:hsl(${hue},70%,60%)">#${b.h}</div>`);
+      for (const e of evs.filter(e => e.at === b.h)) { const el = $('#xRb' + e.h); if (el) el.classList.add('boom'); rs.insertAdjacentHTML('beforeend', `<span class="tag r">😈 #${e.h} átírva → ${e.r === 'win' ? 'sikerült!' : 'elutasítva'}</span>`); }
+      i++;
+    }, 220);
+    mgSay('Visszajátszás', 'Így épült fel a lánc blokkról blokkra. A színek a bányászokat jelölik, a ✂️ a felezést, a ⚙️ a nehézség változását, a 😈 a csalási kísérletet.');
+  }
+  /* JÁTÉKOS */
+  const dB = xCard('xDetP', '🔍 Hamisblokk-kereső'), aB = xCard('xAtk', '😈 Titkos ajánlat');
+  dB.parentElement.hidden = aB.parentElement.hidden = true;
+  const wrap = $('#xWrap'); wrap.prepend(aB.parentElement); wrap.prepend(dB.parentElement);
+  const end = document.createElement('div'); end.style.cssText = 'display:flex;flex-direction:column;gap:12px'; $('#pReveal').appendChild(end);
+  const QZ = [['Mi történik, ha valaki átír egy régi blokkot?', ['Megváltozik a hash-e, és elszakad a lánc', 'Semmi', 'Mindenki kap 5 coint'], 0],
+    ['Mit keres a bányász?', ['Aranyat', 'Olyan hash-t, ami nullákkal kezdődik', 'Elveszett jelszót'], 1],
+    ['Mit nem szabad soha elárulni?', ['A címemet', 'A becenevemet', 'A titkos kulcsomat (pecsétemet)'], 2]];
+  const qa = {};
+  let endKey = '';
+  const _rp = renderPlayer;
+  renderPlayer = function () {
+    _rp.apply(this, arguments);
+    const D = P.phase === 'play' && P.det, A = P.phase === 'play' && P.fOpen;
+    dB.parentElement.hidden = !D; aB.parentElement.hidden = !A;
+    if (D) xSet(dB, D.win ? '<p>Valaki már megtalálta! Nézd a kivetítőt.</p>' : D.wrong ? '<p>Most rossz volt a tipp, várd meg a következő kört.</p>'
+      : `<p class="lbl">Minden blokk „előző” mezője az előtte lévő blokk hash-e. Melyiknél NEM egyezik?</p><div class="xdb">${D.bl.map((b, i) => `<button type="button" data-det="${i}">#${b.h} · hash: <b class="z">${b.hash}</b> · előző: ${i ? b.prev : '—'}</button>`).join('')}</div>`);
+    if (A) xSet(aB, `<p>Valaki átírta a #${A.h}. blokkot, és most <b>${A.n} csaló</b> próbálja újraszámolni a láncot. Beállsz te is? Ha sikerül, +1 coint kapsz… de becsületes bányászként <b>Csalófogó</b> jelvényt szerezhetsz!</p><button type="button" data-atk="1">😈 Beállok a támadásba</button>`);
+    if (P.phase !== 'reveal') return;
+    const k = JSON.stringify([P.you.badges, qa]); if (k === endKey) return; endKey = k;
+    end.innerHTML = `<section class="card xc"><h3>🏅 Jelvényeid</h3><div class="xbadges">${(P.you.badges || []).map(x => `<span>${x}</span>`).join('') || '<span>Még nincs</span>'}</div><button type="button" class="btn-acc" id="xCert" style="margin-top:10px">📜 Oklevél letöltése</button></section>
+      <section class="card xc xq"><h3>🧠 Mini-kvíz</h3>${QZ.map((q, i) => `<p><b>${i + 1}. ${q[0]}</b></p><div class="xrow" style="flex-direction:column">${q[1].map((a, j) => `<button type="button" data-q="${i}" data-a="${j}" class="${qa[i] === j ? (j === q[2] ? 'ok' : 'no') : qa[i] != null && j === q[2] ? 'ok' : ''}" ${qa[i] != null ? 'disabled' : ''}>${a}</button>`).join('')}</div>`).join('')}</section>`;
+  };
+  $('#xWrap').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    if (b.dataset.det != null && P.det) xSend({t: 'det', id: P.det.id, i: +b.dataset.det});
+    if (b.dataset.atk) { xSend({t: 'fjoin'}); mgSay('51%-os támadás 😈', xT('Egyedül nagyon nehéz átírni a láncot. Ha <b>sokan összefognak</b>, és több a gépük, mint a becsületes bányászoknak, sikerülhet. Ezért fontos, hogy sok becsületes bányász legyen!', 'Ha a támadók együtt a hash-erő több mint felét birtokolják, gyorsabban építik a hamis láncot, mint a hálózat a valódit.', 'Kollúzió: a támadás sikere a hash-erő arányától és a lemaradás mélységétől függ (Nakamoto-féle valószínűség exponenciálisan csökken a megerősítések számával).')); }
+  });
+  end.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.id === 'xCert') return cert();
+    if (b.dataset.q != null) { const i = +b.dataset.q, j = +b.dataset.a; qa[i] = j; renderPlayer(); const ok = j === QZ[i][2];
+      mgSay(ok ? 'Helyes! ✅' : 'Majdnem! ❌', ok ? 'Pontosan így van. Ügyes vagy!' : `A jó válasz: <b>${QZ[i][1][QZ[i][2]]}</b>.`); }
+  });
+  /* 9. oklevél: canvas → PNG */
+  function cert() {
+    const cv = document.createElement('canvas'); cv.width = 1200; cv.height = 800; const g = cv.getContext('2d');
+    g.fillStyle = '#0E1420'; g.fillRect(0, 0, 1200, 800); g.strokeStyle = '#F59E2E'; g.lineWidth = 14; g.strokeRect(30, 30, 1140, 740);
+    g.textAlign = 'center'; g.fillStyle = '#FFC46B'; g.font = 'bold 64px sans-serif'; g.fillText('Blokklánc-mester oklevél', 600, 160);
+    g.fillStyle = '#fff'; g.font = 'bold 80px sans-serif'; g.fillText(P.you.nick, 600, 300);
+    g.font = '34px sans-serif'; g.fillStyle = '#B9C3D6';
+    g.fillText(`${fmt(Math.round(P.you.bal * 100) / 100)} coin · ${P.you.mined} bányászott blokk`, 600, 380);
+    g.fillText((P.you.badges || []).join('   ') || 'Részt vett a blokklánc-játékban', 600, 460);
+    g.font = '26px monospace'; g.fillStyle = '#5CC0F5'; g.fillText(P.you.addr, 600, 560);
+    g.font = '26px sans-serif'; g.fillStyle = '#8E9BB5'; g.fillText(new Date().toLocaleDateString('hu-HU'), 600, 680);
+    const a = document.createElement('a'); a.href = cv.toDataURL('image/png'); a.download = 'blokklanc-oklevel.png'; document.body.appendChild(a); a.click(); a.remove();
+    mgSay('Oklevél 📜', 'Letöltötted az okleveledet! Ki is nyomtathatod.');
+  }
+})();
+</script>
+
 </body>
 </html>
