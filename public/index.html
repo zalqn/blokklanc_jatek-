@@ -1213,5 +1213,78 @@ button.fxPop{animation:fxPop .35s ease}
   });
 })();
 </script>
+<style>
+#mgBox{position:fixed;left:50%;bottom:14px;transform:translateX(-50%) translateY(160%);width:min(460px,calc(100vw - 32px));background:#1B2333;color:#fff;border:2px solid #F59E2E;border-radius:16px;padding:12px 40px 12px 14px;z-index:9000;box-shadow:0 10px 30px rgba(0,0,0,.5);transition:transform .35s cubic-bezier(.3,1.6,.5,1);font-size:15px;line-height:1.4}
+#mgBox.on{transform:translateX(-50%) translateY(0)}
+#mgBox b.t{display:block;color:#FFC46B;font-family:'Space Grotesk',sans-serif;font-size:17px;margin-bottom:2px}
+#mgBox .mgX{position:absolute;right:8px;top:8px;background:none;border:0;color:#aaa;font-size:20px;cursor:pointer;padding:2px 6px}
+.mgQ{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#F59E2E;color:#0E1420;font:700 14px sans-serif;border:0;margin-left:6px;cursor:pointer;vertical-align:middle;padding:0}
+</style>
+<div id="mgBox" role="status" aria-live="polite"><b class="t"></b><span class="x"></span><button type="button" class="mgX" aria-label="Bezár">✕</button></div>
+<script>
+/* Magyarázó buborék: minden eseménynél röviden elmondja, MI történt és MIÉRT. */
+(function () {
+  const box = document.getElementById('mgBox'), seen = {}; let tm;
+  function say(title, text, once) {
+    if (once) { if (seen[once]) return; seen[once] = 1; }
+    box.querySelector('.t').textContent = '💡 ' + title; box.querySelector('.x').innerHTML = text;
+    box.classList.add('on'); clearTimeout(tm); tm = setTimeout(() => box.classList.remove('on'), 9000);
+  }
+  box.querySelector('.mgX').onclick = () => box.classList.remove('on');
+  const Q = {
+    bal: ['Egyenleg', 'Ennyi coinod van. Kezdéskor mindenki 10-et kap. Bányászással (+5), utalással és kripto-befektetéssel változik.'],
+    mine: ['Mi az a bányászás?', 'A gép egy „ujjlenyomatot” (<b>hash</b>-t) számol a blokkból és egy véletlen számból (<b>nonce</b>). Ha a hash <b>000</b>-val kezdődik, nyertél: a te blokkod kerül a láncra, és kapsz 5 coint. Ez szerencse: minél többet koppintasz, annál több számot próbálsz ki.'],
+    send: ['Utalás', 'Az utalás először egy <b>várólistára</b> kerül. Csak akkor teljesül, amikor valaki bányász egy blokkot: a bányász „beírja” a láncba. Ezért kell várni rá!'],
+    blocks: ['A lánc', 'Minden blokk tartalmazza az <b>előző blokk hash-ét</b>. Ha valaki egy régit átírna, megváltozna a hash-e, és az összes utána jövő blokk „elszakadna”. Ezért nehéz csalni.'],
+    bx: ['Kripto-tőzsde', 'Ezek <b>valódi árak</b> a világ tőzsdéiről. Ha veszel és az ára nő, többet kapsz vissza eladáskor; ha esik, kevesebbet. 1 coin = 100 dollár. (Csak játék, igazi pénz nincs benne!)']
+  };
+  function addQ(el, key) {
+    if (!el || el.querySelector('.mgQ')) return;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'mgQ'; b.textContent = '?';
+    b.setAttribute('aria-label', 'Magyarázat: ' + Q[key][0]);
+    b.onclick = e => { e.stopPropagation(); say(Q[key][0], Q[key][1]); };
+    el.appendChild(b);
+  }
+  function addAll() {
+    const $1 = s => document.querySelector(s);
+    addQ($1('#pBal') && $1('#pBal').previousElementSibling, 'bal');
+    addQ($1('.minehead h3'), 'mine'); addQ($1('.sendcard h3'), 'send'); addQ($1('#bxCard h3'), 'bx');
+    addQ([...document.querySelectorAll('h3')].find(h => /Legutóbbi blokkok/.test(h.textContent)), 'blocks');
+  }
+  addAll();
+  let taps = 0;
+  document.getElementById('mineBtn').addEventListener('pointerdown', () => {
+    taps++;
+    if (taps === 1) say('Elkezdtél bányászni!', 'Minden koppintás több száz <b>nonce</b>-t próbál ki. Lent látod az utolsó hash-t: ha <b>000</b>-val kezdődne, nyernél. Koppints tovább!');
+    if (taps === 25) say('Miért ilyen nehéz?', 'Egy hash teljesen véletlenszerű. Átlagosan kb. <b>4096</b> próbából egy kezdődik 000-val. Ez a „munka”, amit a bányászok végeznek, ezért hívják <b>proof of work</b>-nek.');
+    if (document.getElementById('pTicker').classList.contains('found')) say('MEGVAN! 🎉', 'Találtál egy hash-t, ami 000-val kezdődik! Elküldtük a kivetítőnek, ő <b>ellenőrzi</b>: újraszámolja ugyanazt a hash-t. Ha stimmel, a blokkod felkerül a láncra.', 'found' + (P && P.tmpl ? P.tmpl.tid : ''));
+  });
+  document.getElementById('pSend').addEventListener('click', () => say('Utalás elküldve', 'Az utalásod most a <b>várólistán</b> van. Amint valaki (akár te!) bányász egy blokkot, az utalás bekerül, és a pénz átmegy. Addig a coin „foglalt”.'));
+  document.getElementById('bxCard').addEventListener('click', e => {
+    const b = e.target.closest('button[data-bx]'); if (!b || !P || !P.px) return;
+    const s = b.dataset.s, x = P.px[s]; if (!x) return;
+    if (b.dataset.bx === 'buy') say(`${s}-t vettél`, `${b.dataset.a} coin = ${b.dataset.a * 100} dollár. Ezért kapsz <b>${(b.dataset.a * 100 / x.usd).toPrecision(4)} ${s}</b>-t (1 ${s} most $${x.usd.toLocaleString('en-US')}). Ha az ár felmegy, nyersz; ha lemegy, veszítesz.`);
+    else say(`Eladtad a ${s}-t`, 'A kriptódat a <b>mostani áron</b> visszaváltottuk coinra. Ha drágábban adtad el, mint vetted, nyertél; ha olcsóbban, veszítettél.');
+  });
+  const _pm = onPMsg;
+  onPMsg = function (m) {
+    _pm.apply(this, arguments);
+    if (!m || m.t !== 'toast') return;
+    if (m.kind === 'win') say('A te blokkod a láncon!', 'A kivetítő ellenőrizte a hash-t, és stimmelt. Kaptál <b>5 coin</b> jutalmat, és a várólistán lévő utalások teljesültek. Most mindenki a következő blokkot bányássza.');
+    if (m.kind === 'late') say('Valaki gyorsabb volt', 'Más hamarabb talált jó hash-t ugyanerre a blokkra. A láncra mindig csak <b>egy</b> blokk kerülhet, a leggyorsabbé. Most új blokk jön.');
+    if (m.kind === 'bad' && /hash/.test(m.msg)) say('Érvénytelen', 'A kivetítő újraszámolta, és a hash nem 000-val kezdődött. Csalni nem lehet: mindenki ellenőrizni tudja.');
+  };
+  const _rp = renderPlayer;
+  renderPlayer = function (prev) {
+    _rp.apply(this, arguments); addAll();
+    if (!P || P.phase !== 'play' || !prev || !prev.chain || !prev.chain.length) return;
+    const a = prev.chain[prev.chain.length - 1], b = P.chain[P.chain.length - 1];
+    if (a && b && b.h > a.h && b.miner !== P.you.addr) say(`Új blokk: #${b.h}`, `Valaki más találta meg a hash-t, ezért ő kapta a jutalmat. Ebbe a blokkba <b>${b.n} utalás</b> került. A te gépeid most a következő blokkon dolgoznak.`);
+  };
+  const _rh = renderHost;
+  renderHost = function () { _rh.apply(this, arguments); say('Kivetítő mód', 'Ez a gép a <b>„szerver”</b>: ő tartja a láncot, és ellenőrzi a bányászok blokkjait. A játékosok a telefonjukkal, a QR-kóddal csatlakoznak.', 'host'); };
+  say('Szia! 👋', 'Ez egy blokklánc-játék. A <b>?</b> gombokra kattintva megtudod, mi mire való. Ha valami történik, itt lent elmagyarázom!', 'hello');
+})();
+</script>
 </body>
 </html>
