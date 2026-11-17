@@ -1230,6 +1230,7 @@ button.fxPop{animation:fxPop .35s ease}
     box.querySelector('.t').textContent = '💡 ' + title; box.querySelector('.x').innerHTML = text;
     box.classList.add('on'); clearTimeout(tm); tm = setTimeout(() => box.classList.remove('on'), 9000);
   }
+  window.mgSay = say;
   box.querySelector('.mgX').onclick = () => box.classList.remove('on');
   const Q = {
     bal: ['Egyenleg', 'Ennyi coinod van. Kezdéskor mindenki 10-et kap. Bányászással (+5), utalással és kripto-befektetéssel változik.'],
@@ -1284,6 +1285,49 @@ button.fxPop{animation:fxPop .35s ease}
   const _rh = renderHost;
   renderHost = function () { _rh.apply(this, arguments); say('Kivetítő mód', 'Ez a gép a <b>„szerver”</b>: ő tartja a láncot, és ellenőrzi a bányászok blokkjait. A játékosok a telefonjukkal, a QR-kóddal csatlakoznak.', 'host'); };
   say('Szia! 👋', 'Ez egy blokklánc-játék. A <b>?</b> gombokra kattintva megtudod, mi mire való. Ha valami történik, itt lent elmagyarázom!', 'hello');
+})();
+</script>
+<style>
+#csBtn{display:block;width:100%;margin:0;padding:16px;border-radius:14px;border:3px dashed #EF4444;background:repeating-linear-gradient(45deg,#3A1010,#3A1010 12px,#4A1414 12px,#4A1414 24px);color:#FCA5A5;font:700 20px 'Space Grotesk',sans-serif;cursor:pointer;text-shadow:0 2px 0 #000}
+#csBtn small{display:block;font:600 13px Inter,sans-serif;color:#fff;opacity:.8}
+#csBtn:hover{border-style:solid}
+@keyframes csWob{0%,100%{transform:rotate(0)}25%{transform:rotate(-1.5deg)}75%{transform:rotate(1.5deg)}}
+#csBtn:not(:disabled){animation:csWob 2.5s infinite}
+#csBtn:disabled{opacity:.45;animation:none;cursor:not-allowed}
+</style>
+<script>
+/* KÖZPÉNZ CSALÁS: a játékos maga indíthatja a hash-átírást (a meglévő hamisító-mechanikát használja). */
+(function () {
+  const btn = document.createElement('button');
+  btn.id = 'csBtn'; btn.type = 'button'; btn.hidden = true;
+  btn.innerHTML = '🕵️ KÖZPÉNZ CSALÁS<small>(Hash átírása)</small>';
+  const card = document.createElement('section'); card.className = 'card'; card.appendChild(btn);
+  const mine = document.querySelector('.card.mine'); if (mine) mine.after(card);
+  btn.addEventListener('click', () => {
+    if (!conn || !conn.open) return;
+    try { conn.send({t: 'cheat'}); } catch (e) {}
+    if (window.mgSay) mgSay('Csalni akarsz? 😈', 'Ki kell választanod egy <b>régi blokkot</b>, és átírni benne, hogy több coin jár neked. De ettől a blokk <b>hash-e megváltozik</b>, és az utána jövő blokkok mind „elszakadnak”. Mindet újra kell bányásznod, ráadásul gyorsabban, mint az összes többi játékos együtt! Ezért olyan nehéz csalni a blokkláncon.');
+  });
+  // HOST: 'cheat' üzenet → ez a játékos lesz a hamisító
+  const _msg = onHostMsg;
+  onHostMsg = function (c, m) {
+    if (m && m.t === 'cheat') {
+      const p = c._tok && H.players[c._tok]; if (!p) return;
+      if (H.phase !== 'play') return reply(c, 'bad', 'Most nem lehet csalni.');
+      if (H.chain.length < 2) return reply(c, 'bad', 'Még nincs átírható blokk. Előbb bányásszatok egyet!');
+      if (H.F && (H.F.state === 'pick' || H.F.state === 'run')) return reply(c, 'bad', H.F.tok === p.tok ? 'Már csalsz, nézd a képernyőd tetejét!' : 'Most valaki más próbál csalni. Várj a sorodra!');
+      H.F = {id: rnd(6, HEX), tok: p.tok, state: 'pick', h: 0, amt: 0, k: 0, prev: '', at: Date.now()};
+      reply(c, 'ok', 'Csalás indul! Válaszd ki fent, melyik blokkot írod át.');
+      changed(); return;
+    }
+    return _msg.apply(this, arguments);
+  };
+  const _rp = renderPlayer;
+  renderPlayer = function () {
+    _rp.apply(this, arguments);
+    btn.hidden = !(P && P.phase === 'play');
+    btn.disabled = !!P.forge || !P.chain || P.chain.length < 2 || P.chain[P.chain.length - 1].h < 1;
+  };
 })();
 </script>
 </body>
